@@ -88,15 +88,14 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
       });
   }, [S, K, calendarDays, r, sigma, optionType, q, costBasis]);
 
-  // Mini decay chart data
+  // Mini decay chart data — sorted ascending by daysRemaining to match main chart
   const miniChartData = useMemo(() => {
     const points = [];
     const maxDays = Math.min(calendarDays, 21);
     for (let d = 0; d <= maxDays; d++) {
-      const remaining = calendarDays - d;
+      const remaining = d; // daysRemaining ascending: 0, 1, 2, ..., maxDays
       const T = remaining / 365;
       points.push({
-        day: d,
         daysRemaining: remaining,
         premium: premiumAt(S, K, T, r, sigma, optionType, q),
       });
@@ -226,8 +225,8 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                   />
                 )}
                 <ReferenceDot
-                  x={calendarDays}
-                  y={miniChartData[0]?.premium || 0}
+                  x={Math.min(calendarDays, 21)}
+                  y={miniChartData[miniChartData.length - 1]?.premium || 0}
                   r={4}
                   fill="#58a6ff"
                   stroke="#0d1117"
@@ -916,6 +915,7 @@ export default function ThetaDecaySimulator() {
   const [riskFreeRate, setRiskFreeRate] = useState(DEFAULTS.riskFreeRate);
   const [dividendYield, setDividendYield] = useState(DEFAULTS.dividendYield);
   const [marketPremium, setMarketPremium] = useState(0);
+  const [chainStrikes, setChainStrikes] = useState([]);
 
   // ── Live data ──
   const live = useLiveData();
@@ -927,6 +927,9 @@ export default function ThetaDecaySimulator() {
     const expiries = chain.expiryDates || [];
     if (expiries.length > 0) {
       setExpiryDate(nseToISODate(expiries[0]));
+      // Populate chain strikes for dropdown
+      const strikes = chain.byExpiry?.[expiries[0]] || [];
+      setChainStrikes(strikes);
       const atm = findATMStrike(chain, expiries[0], chain.spot);
       if (atm) {
         setStrikePrice(atm.strikePrice);
@@ -938,6 +941,18 @@ export default function ThetaDecaySimulator() {
       }
     }
   }, [live, optionType]);
+
+  // When user picks a different strike from chain dropdown, update IV + market premium
+  const handleChainStrikeChange = useCallback((newStrike) => {
+    setStrikePrice(newStrike);
+    const strikeData = chainStrikes.find(s => s.strikePrice === newStrike);
+    if (strikeData) {
+      const relevantIV = optionType === 'CALL' ? strikeData.call?.iv : strikeData.put?.iv;
+      if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
+      const ltp = optionType === 'CALL' ? strikeData.call?.ltp : strikeData.put?.ltp;
+      if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
+    }
+  }, [chainStrikes, optionType]);
 
   // ── Derived ──
   const todayStr = new Date().toISOString().split('T')[0];
@@ -1047,10 +1062,29 @@ export default function ThetaDecaySimulator() {
             <label className="block text-xs font-medium text-[#e6edf3] mb-1">Spot Price (₹)</label>
             <input type="number" value={spotPrice} onChange={(e) => setSpotPrice(Number(e.target.value))} />
           </div>
-          {/* Strike */}
-          <div className="flex-1 min-w-[120px]">
+          {/* Strike — with chain dropdown if available */}
+          <div className="flex-1 min-w-[140px]">
             <label className="block text-xs font-medium text-[#e6edf3] mb-1">Strike Price (₹)</label>
-            <input type="number" value={strikePrice} onChange={(e) => setStrikePrice(Number(e.target.value))} />
+            {chainStrikes.length > 0 ? (
+              <select
+                value={strikePrice}
+                onChange={(e) => handleChainStrikeChange(Number(e.target.value))}
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] focus:border-[#58a6ff] focus:outline-none"
+              >
+                {chainStrikes.map(s => (
+                  <option key={s.strikePrice} value={s.strikePrice}>
+                    {s.strikePrice}
+                    {optionType === 'CALL' && s.call?.iv ? ` (IV: ${s.call.iv.toFixed(1)}%)` : ''}
+                    {optionType === 'PUT' && s.put?.iv ? ` (IV: ${s.put.iv.toFixed(1)}%)` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input type="number" value={strikePrice} onChange={(e) => setStrikePrice(Number(e.target.value))} />
+            )}
+            <span className="text-[10px] text-[#8b949e] mt-0.5 block">
+              {chainStrikes.length > 0 ? `${chainStrikes.length} strikes from chain` : 'Option strike'}
+            </span>
           </div>
           {/* Type */}
           <div className="min-w-[130px]">
