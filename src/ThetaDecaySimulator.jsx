@@ -6,6 +6,7 @@ import {
 import {
   Clock, TrendingDown, BarChart3, Grid3x3, Zap,
   Radio, Loader2, AlertTriangle, DollarSign, ArrowUpDown,
+  Activity, Timer, Layers,
 } from 'lucide-react';
 import { calculateBSM, premiumAt, generateThetaDecayCurve, countTradingDays, getDefaultExpiry } from './bsm.js';
 import { useLiveData, findATMStrike, nseToISODate } from './useLiveData.js';
@@ -39,6 +40,291 @@ function MetricCard({ icon: Icon, iconColor, label, value, subtext }) {
       </div>
       <p className="font-mono text-lg font-bold text-[#e6edf3]">{value}</p>
       {subtext && <p className="text-[10px] text-[#8b949e] mt-0.5">{subtext}</p>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// FEATURE 0 — What-If Scenario Simulator (3-panel)
+// ═══════════════════════════════════════════════════════════
+function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, marketPremium, bsmPremium }) {
+  const [scenarioPrice, setScenarioPrice] = useState(S);
+  const [comboPrice, setComboPrice] = useState(S);
+  const [comboDays, setComboDays] = useState(1);
+
+  const costBasis = marketPremium > 0 ? marketPremium : bsmPremium;
+
+  // Keep scenario price in sync with spot
+  useMemo(() => { setScenarioPrice(S); setComboPrice(S); }, [S]);
+
+  // ── Panel 1: Price Scenario (spot only, same DTE) ──
+  const priceScenario = useMemo(() => {
+    const T = calendarDays / 365;
+    const newPrem = premiumAt(scenarioPrice, K, T, r, sigma, optionType, q);
+    const change = newPrem - bsmPremium;
+    const pnl = newPrem - costBasis;
+    return { newPremium: newPrem, change, pnl };
+  }, [scenarioPrice, K, calendarDays, r, sigma, optionType, q, bsmPremium, costBasis]);
+
+  const quickAdjust = (delta) => setScenarioPrice(prev => Math.max(0, prev + delta));
+
+  // ── Panel 2: Theta Decay Over Time (spot constant, time forward) ──
+  const timeframes = useMemo(() => {
+    const labels = [
+      { label: 'Today EOD', days: 1 },
+      { label: 'Tomorrow', days: 2 },
+      { label: '3 Days', days: 3 },
+      { label: '1 Week', days: 7 },
+      { label: '2 Weeks', days: 14 },
+    ];
+    return labels
+      .filter(tf => tf.days < calendarDays)
+      .map(tf => {
+        const remaining = calendarDays - tf.days;
+        const T = remaining / 365;
+        const prem = premiumAt(S, K, T, r, sigma, optionType, q);
+        const loss = prem - costBasis;
+        return { ...tf, premium: prem, loss };
+      });
+  }, [S, K, calendarDays, r, sigma, optionType, q, costBasis]);
+
+  // Mini decay chart data
+  const miniChartData = useMemo(() => {
+    const points = [];
+    const maxDays = Math.min(calendarDays, 21);
+    for (let d = 0; d <= maxDays; d++) {
+      const remaining = calendarDays - d;
+      const T = remaining / 365;
+      points.push({
+        day: d,
+        daysRemaining: remaining,
+        premium: premiumAt(S, K, T, r, sigma, optionType, q),
+      });
+    }
+    return points;
+  }, [S, K, calendarDays, r, sigma, optionType, q]);
+
+  // ── Panel 3: Price + Time Combined ──
+  const combo = useMemo(() => {
+    const remaining = Math.max(calendarDays - comboDays, 0);
+    const T = remaining / 365;
+    const newPrem = premiumAt(comboPrice, K, T, r, sigma, optionType, q);
+    const totalPnl = newPrem - costBasis;
+
+    // Decompose: price effect = premium(newSpot, sameT) - premium(oldSpot, sameT)
+    const T0 = calendarDays / 365;
+    const premAtNewSpotSameT = premiumAt(comboPrice, K, T0, r, sigma, optionType, q);
+    const priceEffect = premAtNewSpotSameT - bsmPremium;
+
+    // Time effect = premium(oldSpot, newT) - premium(oldSpot, oldT)
+    const premAtOldSpotNewT = premiumAt(S, K, T, r, sigma, optionType, q);
+    const timeEffect = premAtOldSpotNewT - bsmPremium;
+
+    // IV effect = 0 (held constant)
+    const ivEffect = 0;
+
+    return { newPremium: newPrem, totalPnl, priceEffect, timeEffect, ivEffect };
+  }, [comboPrice, comboDays, K, calendarDays, r, sigma, optionType, q, S, bsmPremium, costBasis]);
+
+  const pnlColor = (v) => v >= 0 ? 'text-[#3fb950]' : 'text-[#f85149]';
+
+  return (
+    <div className="card p-5 mb-5">
+      <div className="flex items-center gap-2 mb-1">
+        <Activity size={18} className="text-[#58a6ff]" />
+        <h2 className="text-lg font-semibold text-[#e6edf3]">What-If Scenario Simulator</h2>
+      </div>
+      <p className="text-xs text-[#8b949e] mb-4">
+        See how your option behaves under different market conditions
+      </p>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* ── Panel 1: Price Scenario ── */}
+        <div className="bg-[#0d1117] rounded-xl border border-[#30363d] p-4">
+          <div className="flex items-center gap-1.5 mb-3">
+            <TrendingDown size={14} className="text-[#58a6ff]" />
+            <span className="text-sm font-semibold text-[#e6edf3]">Price Scenario</span>
+          </div>
+          <p className="text-[10px] text-[#8b949e] mb-2">If the index opens at..</p>
+
+          <input
+            type="number"
+            value={scenarioPrice}
+            onChange={(e) => setScenarioPrice(Number(e.target.value))}
+            className="text-center text-lg font-bold mb-2"
+          />
+
+          <div className="flex gap-1.5 mb-3">
+            {[-100, -50, 50, 100].map(d => (
+              <button
+                key={d}
+                onClick={() => quickAdjust(d)}
+                className="flex-1 py-1.5 text-[10px] font-mono font-semibold rounded-md border border-[#30363d] bg-[#161b22] text-[#8b949e] hover:text-[#e6edf3] hover:border-[#58a6ff40] transition-colors cursor-pointer"
+              >
+                {d > 0 ? '+' : ''}{d}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-[#8b949e]">New Premium</span>
+              <span className="font-mono font-bold text-[#e6edf3]">{fmt(priceScenario.newPremium)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-[#8b949e]">Change</span>
+              <span className={`font-mono font-semibold ${pnlColor(priceScenario.change)}`}>
+                {sign(priceScenario.change)}{fmt(priceScenario.change).replace('\u20b9-', '-\u20b9')}
+              </span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-[#8b949e]">P&L (if bought)</span>
+              <span className={`font-mono font-semibold ${pnlColor(priceScenario.pnl)}`}>
+                {sign(priceScenario.pnl)}{fmt(priceScenario.pnl).replace('\u20b9-', '-\u20b9')}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Panel 2: Theta Decay Over Time ── */}
+        <div className="bg-[#0d1117] rounded-xl border border-[#30363d] p-4">
+          <div className="flex items-center gap-1.5 mb-3">
+            <Timer size={14} className="text-[#e3b341]" />
+            <span className="text-sm font-semibold text-[#e6edf3]">Theta Decay Over Time</span>
+          </div>
+
+          {/* Mini chart */}
+          <div className="h-[120px] -ml-2 mb-3">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={miniChartData} margin={{ top: 2, right: 8, left: 0, bottom: 2 }}>
+                <defs>
+                  <linearGradient id="miniDecayGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#e3b341" stopOpacity={0.2} />
+                    <stop offset="100%" stopColor="#e3b341" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis
+                  dataKey="daysRemaining"
+                  reversed
+                  tick={{ fill: '#6e7681', fontSize: 8 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: '#6e7681', fontSize: 8 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={v => '\u20b9' + v.toFixed(0)}
+                  width={35}
+                />
+                {marketPremium > 0 && (
+                  <ReferenceLine
+                    y={marketPremium}
+                    stroke="#a371f7"
+                    strokeDasharray="3 3"
+                    strokeWidth={1}
+                  />
+                )}
+                <ReferenceDot
+                  x={calendarDays}
+                  y={miniChartData[0]?.premium || 0}
+                  r={4}
+                  fill="#58a6ff"
+                  stroke="#0d1117"
+                  strokeWidth={2}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="premium"
+                  stroke="#e3b341"
+                  strokeWidth={2}
+                  fill="url(#miniDecayGrad)"
+                  dot={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Timeframe table */}
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-[#6e7681] border-b border-[#30363d]/50">
+                <th className="text-left py-1 font-medium">Timeframe</th>
+                <th className="text-right py-1 font-medium">Est. Premium</th>
+                <th className="text-right py-1 font-medium">Loss from Now</th>
+              </tr>
+            </thead>
+            <tbody>
+              {timeframes.map(tf => (
+                <tr key={tf.label} className="border-b border-[#30363d]/20">
+                  <td className="py-1 text-[#e6edf3] font-medium">{tf.label}</td>
+                  <td className="py-1 text-right font-mono text-[#8b949e]">{fmt(tf.premium)}</td>
+                  <td className={`py-1 text-right font-mono font-semibold ${pnlColor(tf.loss)}`}>
+                    {fmt(tf.loss).replace('\u20b9-', '-\u20b9')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Panel 3: Price + Time Combined ── */}
+        <div className="bg-[#0d1117] rounded-xl border border-[#30363d] p-4">
+          <div className="flex items-center gap-1.5 mb-3">
+            <Layers size={14} className="text-[#39d0d8]" />
+            <span className="text-sm font-semibold text-[#e6edf3]">Price + Time Combined</span>
+          </div>
+
+          <div className="space-y-2.5 mb-3">
+            <div>
+              <label className="text-[10px] text-[#8b949e] block mb-0.5">Scenario Price (\u20b9)</label>
+              <input
+                type="number"
+                value={comboPrice}
+                onChange={(e) => setComboPrice(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-[#8b949e] block mb-0.5">Days Forward (trading)</label>
+              <input
+                type="number"
+                value={comboDays}
+                min={1}
+                max={calendarDays - 1}
+                onChange={(e) => setComboDays(Math.max(1, Math.min(calendarDays - 1, Number(e.target.value))))}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5 mb-3">
+            <div className="flex justify-between text-xs">
+              <span className="text-[#8b949e]">New Premium</span>
+              <span className="font-mono font-bold text-[#e6edf3]">{fmt(combo.newPremium)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-[#8b949e]">Total P&L</span>
+              <span className={`font-mono font-bold ${pnlColor(combo.totalPnl)}`}>
+                {fmt(combo.totalPnl).replace('\u20b9-', '-\u20b9')}
+              </span>
+            </div>
+          </div>
+
+          {/* P&L Decomposition */}
+          <div className="rounded-lg bg-[#161b22] border border-[#30363d]/50 p-2.5">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+              <span className={`font-mono ${pnlColor(combo.priceEffect)}`}>
+                Price effect: {sign(combo.priceEffect)}{fmt(combo.priceEffect).replace('\u20b9-', '-\u20b9')}
+              </span>
+              <span className={`font-mono ${pnlColor(combo.timeEffect)}`}>
+                Time decay: {fmt(combo.timeEffect).replace('\u20b9-', '-\u20b9')}
+              </span>
+              <span className="font-mono text-[#8b949e]">
+                IV effect: \u20b90 (held constant)
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -893,6 +1179,13 @@ export default function ThetaDecaySimulator() {
               subtext="Spot must move this much to offset theta"
             />
           </div>
+
+          {/* ── What-If Scenario Simulator ── */}
+          <WhatIfScenarioSection
+            S={spotPrice} K={strikePrice} calendarDays={calendarDays}
+            r={metrics.r} sigma={metrics.sigma} optionType={optionType} q={metrics.q}
+            marketPremium={marketPremium} bsmPremium={metrics.premium}
+          />
 
           {/* ── Feature 1: Decay Curve ── */}
           <div className="mb-5">
