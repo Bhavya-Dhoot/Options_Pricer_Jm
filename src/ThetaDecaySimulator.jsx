@@ -54,10 +54,18 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
 
   const costBasis = marketPremium > 0 ? marketPremium : bsmPremium;
 
-  // Keep scenario price in sync with spot
-  useMemo(() => { setScenarioPrice(S); setComboPrice(S); }, [S]);
+  // Keep scenario prices in sync when spot changes
+  React.useEffect(() => { setScenarioPrice(S); setComboPrice(S); }, [S]);
 
-  // ── Panel 1: Price Scenario (spot only, same DTE) ──
+  // Helper: format negative ₹ values as -₹X.XX instead of ₹-X.XX
+  const fmtPnl = (v) => {
+    const str = fmt(v);
+    return str.replace('₹-', '-₹');
+  };
+
+  const pnlColor = (v) => v >= 0 ? 'text-[#3fb950]' : 'text-[#f85149]';
+
+  // ── Panel 1: Price Scenario (spot change only, same DTE) ──
   const priceScenario = useMemo(() => {
     const T = calendarDays / 365;
     const newPrem = premiumAt(scenarioPrice, K, T, r, sigma, optionType, q);
@@ -88,15 +96,15 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
       });
   }, [S, K, calendarDays, r, sigma, optionType, q, costBasis]);
 
-  // Mini decay chart data — sorted ascending by daysRemaining to match main chart
+  // Mini decay chart — data sorted ascending by daysRemaining (0, 1, 2, ...)
+  // so with reversed X-axis the curve shows premium decreasing left to right
   const miniChartData = useMemo(() => {
     const points = [];
     const maxDays = Math.min(calendarDays, 21);
     for (let d = 0; d <= maxDays; d++) {
-      const remaining = d; // daysRemaining ascending: 0, 1, 2, ..., maxDays
-      const T = remaining / 365;
+      const T = d / 365;
       points.push({
-        daysRemaining: remaining,
+        daysRemaining: d,
         premium: premiumAt(S, K, T, r, sigma, optionType, q),
       });
     }
@@ -110,22 +118,15 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
     const newPrem = premiumAt(comboPrice, K, T, r, sigma, optionType, q);
     const totalPnl = newPrem - costBasis;
 
-    // Decompose: price effect = premium(newSpot, sameT) - premium(oldSpot, sameT)
+    // Decompose P&L
     const T0 = calendarDays / 365;
-    const premAtNewSpotSameT = premiumAt(comboPrice, K, T0, r, sigma, optionType, q);
-    const priceEffect = premAtNewSpotSameT - bsmPremium;
+    const priceEffect = premiumAt(comboPrice, K, T0, r, sigma, optionType, q) - bsmPremium;
+    const timeEffect = premiumAt(S, K, T, r, sigma, optionType, q) - bsmPremium;
 
-    // Time effect = premium(oldSpot, newT) - premium(oldSpot, oldT)
-    const premAtOldSpotNewT = premiumAt(S, K, T, r, sigma, optionType, q);
-    const timeEffect = premAtOldSpotNewT - bsmPremium;
-
-    // IV effect = 0 (held constant)
-    const ivEffect = 0;
-
-    return { newPremium: newPrem, totalPnl, priceEffect, timeEffect, ivEffect };
+    return { newPremium: newPrem, totalPnl, priceEffect, timeEffect };
   }, [comboPrice, comboDays, K, calendarDays, r, sigma, optionType, q, S, bsmPremium, costBasis]);
 
-  const pnlColor = (v) => v >= 0 ? 'text-[#3fb950]' : 'text-[#f85149]';
+  const maxDaysChart = Math.min(calendarDays, 21);
 
   return (
     <div className="card p-5 mb-5">
@@ -173,13 +174,13 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
             <div className="flex justify-between text-xs">
               <span className="text-[#8b949e]">Change</span>
               <span className={`font-mono font-semibold ${pnlColor(priceScenario.change)}`}>
-                {sign(priceScenario.change)}{fmt(priceScenario.change).replace('\u20b9-', '-\u20b9')}
+                {sign(priceScenario.change)}{fmtPnl(priceScenario.change)}
               </span>
             </div>
             <div className="flex justify-between text-xs">
               <span className="text-[#8b949e]">P&L (if bought)</span>
               <span className={`font-mono font-semibold ${pnlColor(priceScenario.pnl)}`}>
-                {sign(priceScenario.pnl)}{fmt(priceScenario.pnl).replace('\u20b9-', '-\u20b9')}
+                {sign(priceScenario.pnl)}{fmtPnl(priceScenario.pnl)}
               </span>
             </div>
           </div>
@@ -208,13 +209,31 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                   tick={{ fill: '#6e7681', fontSize: 8 }}
                   axisLine={false}
                   tickLine={false}
+                  label={{ value: 'Days Remaining', fill: '#6e7681', fontSize: 7, position: 'insideBottom', offset: 0 }}
                 />
                 <YAxis
                   tick={{ fill: '#6e7681', fontSize: 8 }}
                   axisLine={false}
                   tickLine={false}
-                  tickFormatter={v => '\u20b9' + v.toFixed(0)}
-                  width={35}
+                  tickFormatter={(v) => '₹' + v.toFixed(0)}
+                  width={38}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload;
+                    return (
+                      <div className="bg-[#161b22] border border-[#30363d] rounded-lg px-2.5 py-1.5 text-[10px] shadow-lg">
+                        <p className="text-[#8b949e]">Days remaining: {d.daysRemaining}</p>
+                        <p className="text-[#e3b341] font-mono font-bold">{fmt(d.premium)}</p>
+                        {marketPremium > 0 && (
+                          <p className={`font-mono ${d.premium >= marketPremium ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
+                            P&L: {fmtPnl(d.premium - marketPremium)}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  }}
                 />
                 {marketPremium > 0 && (
                   <ReferenceLine
@@ -225,7 +244,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                   />
                 )}
                 <ReferenceDot
-                  x={Math.min(calendarDays, 21)}
+                  x={maxDaysChart}
                   y={miniChartData[miniChartData.length - 1]?.premium || 0}
                   r={4}
                   fill="#58a6ff"
@@ -239,6 +258,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                   strokeWidth={2}
                   fill="url(#miniDecayGrad)"
                   dot={false}
+                  activeDot={{ r: 3, fill: '#e3b341', stroke: '#0d1117', strokeWidth: 1 }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -259,7 +279,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                   <td className="py-1 text-[#e6edf3] font-medium">{tf.label}</td>
                   <td className="py-1 text-right font-mono text-[#8b949e]">{fmt(tf.premium)}</td>
                   <td className={`py-1 text-right font-mono font-semibold ${pnlColor(tf.loss)}`}>
-                    {fmt(tf.loss).replace('\u20b9-', '-\u20b9')}
+                    {fmtPnl(tf.loss)}
                   </td>
                 </tr>
               ))}
@@ -276,7 +296,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
 
           <div className="space-y-2.5 mb-3">
             <div>
-              <label className="text-[10px] text-[#8b949e] block mb-0.5">Scenario Price (\u20b9)</label>
+              <label className="text-[10px] text-[#8b949e] block mb-0.5">Scenario Price (₹)</label>
               <input
                 type="number"
                 value={comboPrice}
@@ -303,7 +323,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
             <div className="flex justify-between text-xs">
               <span className="text-[#8b949e]">Total P&L</span>
               <span className={`font-mono font-bold ${pnlColor(combo.totalPnl)}`}>
-                {fmt(combo.totalPnl).replace('\u20b9-', '-\u20b9')}
+                {fmtPnl(combo.totalPnl)}
               </span>
             </div>
           </div>
@@ -312,13 +332,13 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
           <div className="rounded-lg bg-[#161b22] border border-[#30363d]/50 p-2.5">
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
               <span className={`font-mono ${pnlColor(combo.priceEffect)}`}>
-                Price effect: {sign(combo.priceEffect)}{fmt(combo.priceEffect).replace('\u20b9-', '-\u20b9')}
+                Price effect: {sign(combo.priceEffect)}{fmtPnl(combo.priceEffect)}
               </span>
               <span className={`font-mono ${pnlColor(combo.timeEffect)}`}>
-                Time decay: {fmt(combo.timeEffect).replace('\u20b9-', '-\u20b9')}
+                Time decay: {fmtPnl(combo.timeEffect)}
               </span>
               <span className="font-mono text-[#8b949e]">
-                IV effect: \u20b90 (held constant)
+                IV effect: ₹0 (held constant)
               </span>
             </div>
           </div>
