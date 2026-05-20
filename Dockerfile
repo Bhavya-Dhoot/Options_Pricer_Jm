@@ -3,6 +3,7 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 COPY package.json package-lock.json ./
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN npm ci
 COPY . .
 RUN npm run build
@@ -41,7 +42,7 @@ WORKDIR /app
 
 # Install only production dependencies
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy server code
 COPY server/ ./server/
