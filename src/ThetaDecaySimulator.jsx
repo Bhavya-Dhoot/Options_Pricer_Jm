@@ -642,7 +642,7 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
             {hoverData.marketPremium !== null && (
               <span className="text-[#a371f7] font-mono">Market: {fmt(hoverData.marketPremium)}</span>
             )}
-            <span className="text-[#f85149] font-mono">Î˜: {hoverData.theta.toFixed(2)}/day</span>
+            <span className="text-[#f85149] font-mono">Θ: {hoverData.theta.toFixed(2)}/day</span>
             <span className="text-[#58a6ff] font-mono">Î”: {hoverData.delta.toFixed(4)}</span>
             {hoverData.marketPremium !== null && (
               <span className={`font-mono ${hoverData.marketPremium >= marketPremium ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
@@ -733,7 +733,7 @@ function DailyBreakdownSection({ S, K, calendarDays, r, sigma, optionType, q, ma
               <th className="text-right py-2 px-2 font-medium">Daily Loss</th>
               <th className="text-right py-2 px-2 font-medium">Cum. Loss</th>
               {hasMarket && <th className="text-right py-2 px-2 font-medium">Real P&L</th>}
-              <th className="text-right py-2 px-2 font-medium">Î˜/day</th>
+              <th className="text-right py-2 px-2 font-medium">Θ/day</th>
               <th className="text-right py-2 px-2 font-medium">% Decayed</th>
             </tr>
           </thead>
