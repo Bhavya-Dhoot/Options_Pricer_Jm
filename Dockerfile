@@ -4,7 +4,8 @@ FROM node:20-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-RUN npm ci
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+RUN npm ci --ignore-scripts
 COPY . .
 RUN npm run build
 
@@ -36,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Tell Puppeteer to use the system Chromium instead of downloading its own
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
