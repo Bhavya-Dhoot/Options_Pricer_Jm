@@ -15,17 +15,30 @@
  */
 
 import express from 'express';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { existsSync } from 'fs';
 import { nseApiFetch, refreshSession, closeBrowser } from './nse-session.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ── CORS (allow Vite dev server) ──
+// ── CORS (allow Vite dev server + any origin) ──
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
   next();
 });
+
+// ── Serve static frontend in production ──
+const distPath = join(__dirname, '..', 'dist');
+if (existsSync(distPath)) {
+  console.log('[Proxy] Serving static frontend from', distPath);
+  app.use(express.static(distPath));
+}
 
 // ── Cache store ──
 const cache = {};
@@ -183,6 +196,13 @@ app.get('/api/option-chain', async (req, res) => {
     res.status(502).json({ error: `Failed to fetch option chain for ${symbol}`, detail: err.message });
   }
 });
+
+// ── SPA fallback: serve index.html for all non-API routes (production) ──
+if (existsSync(distPath)) {
+  app.get('*', (req, res) => {
+    res.sendFile(join(distPath, 'index.html'));
+  });
+}
 
 // ── Startup ──
 async function start() {

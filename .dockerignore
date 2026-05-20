@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+.git
+.gitignore
+.vscode
+.idea
+*.log
+*.md
+debug_nse.mjs
+audit_bsm.mjs
+market_validation.mjs
+sweep_test.mjs
+nse_raw_debug.json
