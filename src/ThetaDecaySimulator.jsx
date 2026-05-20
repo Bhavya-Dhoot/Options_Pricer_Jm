@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceDot, Legend,
@@ -11,11 +11,11 @@ import {
 import { calculateBSM, premiumAt, generateThetaDecayCurve, countTradingDays, getDefaultExpiry } from './bsm.js';
 import { useLiveData, findATMStrike, nseToISODate } from './useLiveData.js';
 
-function fmt(v) { return 'â‚¹' + v.toFixed(2); }
+function fmt(v) { return '₹' + v.toFixed(2); }
 function sign(v) { return v >= 0 ? '+' : ''; }
 function pct(v) { return (v * 100).toFixed(1) + '%'; }
 
-// â”€â”€ Default values (mirrors OptionsPricer) â”€â”€
+//  Default values (mirrors OptionsPricer) 
 const DEFAULTS = {
   spotPrice: 24500,
   strikePrice: 24500,
@@ -25,7 +25,7 @@ const DEFAULTS = {
   dividendYield: 1.2,
 };
 
-// â”€â”€ Summary Metric Card â”€â”€
+//  Summary Metric Card 
 function MetricCard({ icon: Icon, iconColor, label, value, subtext }) {
   return (
     <div className="card p-3.5 flex-1 min-w-[140px]">
@@ -44,9 +44,9 @@ function MetricCard({ icon: Icon, iconColor, label, value, subtext }) {
   );
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// FEATURE 0 â€” What-If Scenario Simulator (3-panel)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
+// FEATURE 0  -  What-If Scenario Simulator (3-panel)
+// ═══════════════════════════════════════════════════════════
 function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, marketPremium, bsmPremium }) {
   const [scenarioPrice, setScenarioPrice] = useState(S);
   const [comboPrice, setComboPrice] = useState(S);
@@ -59,11 +59,11 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
   // Keep scenario prices in sync when spot changes
   React.useEffect(() => { setScenarioPrice(S); setComboPrice(S); }, [S]);
 
-  // Helper: format negative â‚¹ values as -â‚¹X.XX instead of â‚¹-X.XX
-  const fmtPnl = (v) => fmt(v).replace('â‚¹-', '-â‚¹');
+  // Helper: format negative ₹ values as -₹X.XX instead of ₹-X.XX
+  const fmtPnl = (v) => fmt(v).replace('₹-', '-₹');
   const pnlColor = (v) => v >= 0 ? 'text-[#3fb950]' : 'text-[#f85149]';
 
-  // Days forward handlers â€” allow free typing, clamp only on blur
+  // Days forward handlers  -  allow free typing, clamp only on blur
   const handleDaysChange = (e) => {
     const raw = e.target.value;
     setComboDaysRaw(raw);
@@ -79,7 +79,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
     setComboDaysRaw(String(clamped));
   };
 
-  // â”€â”€ Panel 1: Price Scenario (spot change only, same DTE) â”€â”€
+  //  Panel 1: Price Scenario (spot change only, same DTE) 
   const priceScenario = useMemo(() => {
     const T = calendarDays / 365;
     const newPrem = premiumAt(scenarioPrice, K, T, r, sigma, optionType, q);
@@ -90,7 +90,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
 
   const quickAdjust = (delta) => setScenarioPrice(prev => Math.max(0, prev + delta));
 
-  // â”€â”€ Panel 2: Theta Decay Over Time (spot constant, time forward) â”€â”€
+  //  Panel 2: Theta Decay Over Time (spot constant, time forward) 
   const timeframes = useMemo(() => {
     const labels = [
       { label: 'Today EOD', days: 1 },
@@ -117,7 +117,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
     return solveImpliedIV(S, K, T, r, marketPremium, optionType, q);
   }, [S, K, calendarDays, r, marketPremium, optionType, q, hasMarket]);
 
-  // Mini decay chart â€” dual curves (BSM yellow + market-implied purple)
+  // Mini decay chart  -  dual curves (BSM yellow + market-implied purple)
   const miniChartData = useMemo(() => {
     const points = [];
     const maxDays = Math.min(calendarDays, 21);
@@ -135,7 +135,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
     return points;
   }, [S, K, calendarDays, r, sigma, optionType, q, impliedIV]);
 
-  // â”€â”€ Panel 3: Price + Time Combined â”€â”€
+  //  Panel 3: Price + Time Combined 
   const combo = useMemo(() => {
     const remaining = Math.max(calendarDays - comboDays, 0);
     const T = remaining / 365;
@@ -163,7 +163,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* â”€â”€ Panel 1: Price Scenario â”€â”€ */}
+        {/*  Panel 1: Price Scenario  */}
         <div className="bg-[#0d1117] rounded-xl border border-[#30363d] p-4">
           <div className="flex items-center gap-1.5 mb-3">
             <TrendingDown size={14} className="text-[#58a6ff]" />
@@ -210,14 +210,14 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
           </div>
         </div>
 
-        {/* â”€â”€ Panel 2: Theta Decay Over Time â”€â”€ */}
+        {/*  Panel 2: Theta Decay Over Time  */}
         <div className="bg-[#0d1117] rounded-xl border border-[#30363d] p-4">
           <div className="flex items-center gap-1.5 mb-3">
             <Timer size={14} className="text-[#e3b341]" />
             <span className="text-sm font-semibold text-[#e6edf3]">Theta Decay Over Time</span>
           </div>
 
-          {/* Mini chart â€” dual curves */}
+          {/* Mini chart  -  dual curves */}
           <div className="h-[130px] -ml-2 mb-2">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={miniChartData} margin={{ top: 2, right: 8, left: 0, bottom: 12 }}>
@@ -243,7 +243,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                   tick={{ fill: '#6e7681', fontSize: 8 }}
                   axisLine={false}
                   tickLine={false}
-                  tickFormatter={(v) => 'â‚¹' + v.toFixed(0)}
+                  tickFormatter={(v) => '₹' + v.toFixed(0)}
                   width={38}
                 />
                 <Tooltip
@@ -333,7 +333,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
           </table>
         </div>
 
-        {/* â”€â”€ Panel 3: Price + Time Combined â”€â”€ */}
+        {/*  Panel 3: Price + Time Combined  */}
         <div className="bg-[#0d1117] rounded-xl border border-[#30363d] p-4">
           <div className="flex items-center gap-1.5 mb-3">
             <Layers size={14} className="text-[#39d0d8]" />
@@ -342,7 +342,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
 
           <div className="space-y-2.5 mb-3">
             <div>
-              <label className="text-[10px] text-[#8b949e] block mb-0.5">Scenario Price (â‚¹)</label>
+              <label className="text-[10px] text-[#8b949e] block mb-0.5">Scenario Price (₹)</label>
               <input
                 type="number"
                 value={comboPrice}
@@ -361,7 +361,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                 onBlur={handleDaysBlur}
               />
               <span className="text-[9px] text-[#6e7681] mt-0.5 block">
-                Range: 1â€“{Math.max(calendarDays - 1, 1)} days
+                Range: 1 - {Math.max(calendarDays - 1, 1)} days
               </span>
             </div>
           </div>
@@ -389,7 +389,7 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                 Time decay: {fmtPnl(combo.timeEffect)}
               </span>
               <span className="font-mono text-[#8b949e]">
-                IV effect: â‚¹0 (held constant)
+                IV effect: ₹0 (held constant)
               </span>
             </div>
           </div>
@@ -400,10 +400,10 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
 }
 
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 // IMPLIED IV SOLVER (Newton-Raphson)
 // Back-solves the IV that produces the given market premium.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0) {
   if (T <= 0 || marketPrice <= 0) return null;
   const intrinsic = optionType === 'CALL' ? Math.max(S - K, 0) : Math.max(K - S, 0);
@@ -425,9 +425,9 @@ function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0) {
   return sigma;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// FEATURE 1 â€” Interactive Decay Curve (Dual: BSM + Market)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
+// FEATURE 1  -  Interactive Decay Curve (Dual: BSM + Market)
+// ═══════════════════════════════════════════════════════════
 function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, marketPremium }) {
   const [hoverDay, setHoverDay] = useState(null);
 
@@ -440,13 +440,13 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
     return solveImpliedIV(S, K, T, r, marketPremium, optionType, q);
   }, [S, K, calendarDays, r, marketPremium, optionType, q, hasMarket]);
 
-  // Generate BSM decay curve (yellow â€” using user's input IV)
+  // Generate BSM decay curve (yellow  -  using user's input IV)
   const bsmCurve = useMemo(
     () => generateThetaDecayCurve(S, K, calendarDays, r, sigma, optionType, q),
     [S, K, calendarDays, r, sigma, optionType, q]
   );
 
-  // Generate market-implied decay curve (purple â€” using solved IV)
+  // Generate market-implied decay curve (purple  -  using solved IV)
   const marketCurve = useMemo(() => {
     if (!impliedIV) return null;
     return generateThetaDecayCurve(S, K, calendarDays, r, impliedIV, optionType, q);
@@ -495,7 +495,7 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
         )}
         {d.marketPremium !== null && (
           <p className="text-[#8b949e] mt-1">
-            Gap: {fmt(d.marketPremium - d.bsmPremium).replace('â‚¹-', '-â‚¹')}
+            Gap: {fmt(d.marketPremium - d.bsmPremium).replace('₹-', '-₹')}
           </p>
         )}
       </div>
@@ -527,7 +527,7 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
               {' Â· '}
               <span className="text-[#a371f7]">Purple</span> = market-implied decay (IV {impliedIV ? (impliedIV * 100).toFixed(1) : '?'}%)
             </>
-          : 'How your option premium erodes as time passes â€” assuming spot and IV stay constant'
+          : 'How your option premium erodes as time passes  -  assuming spot and IV stay constant'
         }
       </p>
 
@@ -553,7 +553,7 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
             />
             <YAxis
               tick={{ fill: '#8b949e', fontSize: 11 }}
-              tickFormatter={(v) => 'â‚¹' + v.toFixed(0)}
+              tickFormatter={(v) => '₹' + v.toFixed(0)}
             />
             <Tooltip content={<CustomTooltip />} />
 
@@ -646,7 +646,7 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
             <span className="text-[#58a6ff] font-mono">Î”: {hoverData.delta.toFixed(4)}</span>
             {hoverData.marketPremium !== null && (
               <span className={`font-mono ${hoverData.marketPremium >= marketPremium ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
-                Real P&L: {fmt(hoverData.marketPremium - marketPremium).replace('â‚¹-', '-â‚¹')}
+                Real P&L: {fmt(hoverData.marketPremium - marketPremium).replace('₹-', '-₹')}
               </span>
             )}
           </div>
@@ -656,9 +656,9 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
   );
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// FEATURE 2 â€” Daily Theta Breakdown Table
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
+// FEATURE 2  -  Daily Theta Breakdown Table
+// ═══════════════════════════════════════════════════════════
 function DailyBreakdownSection({ S, K, calendarDays, r, sigma, optionType, q, marketPremium }) {
   const [showAll, setShowAll] = useState(false);
 
@@ -720,7 +720,7 @@ function DailyBreakdownSection({ S, K, calendarDays, r, sigma, optionType, q, ma
         </button>
       </div>
       <p className="text-xs text-[#8b949e] mb-3">
-        Theta accelerates near expiry â€” the <span className="text-[#f85149]">last 7 days</span> are the most destructive
+        Theta accelerates near expiry  -  the <span className="text-[#f85149]">last 7 days</span> are the most destructive
       </p>
 
       <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
@@ -753,14 +753,14 @@ function DailyBreakdownSection({ S, K, calendarDays, r, sigma, optionType, q, ma
                 <td className="py-1.5 px-2 text-right font-mono text-[#8b949e]">{row.remaining}</td>
                 <td className="py-1.5 px-2 text-right font-mono text-[#e6edf3]">{fmt(row.premium)}</td>
                 <td className="py-1.5 px-2 text-right font-mono text-[#f85149]">
-                  {fmt(row.dailyLoss).replace('â‚¹-', '-â‚¹')}
+                  {fmt(row.dailyLoss).replace('₹-', '-₹')}
                 </td>
                 <td className="py-1.5 px-2 text-right font-mono text-[#f85149]">
-                  {fmt(row.cumLoss).replace('â‚¹-', '-â‚¹')}
+                  {fmt(row.cumLoss).replace('₹-', '-₹')}
                 </td>
                 {hasMarket && (
                   <td className={`py-1.5 px-2 text-right font-mono font-semibold ${row.realPnl >= 0 ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
-                    {sign(row.realPnl)}{fmt(row.realPnl).replace('â‚¹-', '-â‚¹')}
+                    {sign(row.realPnl)}{fmt(row.realPnl).replace('₹-', '-₹')}
                   </td>
                 )}
                 <td className="py-1.5 px-2 text-right font-mono text-[#e3b341]">
@@ -789,9 +789,9 @@ function DailyBreakdownSection({ S, K, calendarDays, r, sigma, optionType, q, ma
   );
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// FEATURE 3 â€” Multi-Strike Comparison
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
+// FEATURE 3  -  Multi-Strike Comparison
+// ═══════════════════════════════════════════════════════════
 function MultiStrikeSection({ S, K, calendarDays, r, sigma, optionType, q }) {
   const stepSize = S > 10000 ? 100 : S > 1000 ? 50 : 10;
   const strikes = [K - stepSize, K, K + stepSize];
@@ -839,7 +839,7 @@ function MultiStrikeSection({ S, K, calendarDays, r, sigma, optionType, q }) {
         <h2 className="text-lg font-semibold text-[#e6edf3]">Multi-Strike Comparison</h2>
       </div>
       <p className="text-xs text-[#8b949e] mb-4">
-        How moneyness affects decay â€” ITM retains intrinsic value, OTM decays to zero
+        How moneyness affects decay  -  ITM retains intrinsic value, OTM decays to zero
       </p>
 
       <div className="h-[260px] -ml-2">
@@ -852,7 +852,7 @@ function MultiStrikeSection({ S, K, calendarDays, r, sigma, optionType, q }) {
               tick={{ fill: '#8b949e', fontSize: 11 }}
               label={{ value: 'Days Remaining', position: 'insideBottom', offset: -2, fill: '#8b949e', fontSize: 10 }}
             />
-            <YAxis tick={{ fill: '#8b949e', fontSize: 11 }} tickFormatter={(v) => 'â‚¹' + v.toFixed(0)} />
+            <YAxis tick={{ fill: '#8b949e', fontSize: 11 }} tickFormatter={(v) => '₹' + v.toFixed(0)} />
             <Tooltip content={<CustomTooltip />} />
             {strikes.map((strike, idx) => (
               <Line
@@ -876,9 +876,9 @@ function MultiStrikeSection({ S, K, calendarDays, r, sigma, optionType, q }) {
   );
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// FEATURE 4 â€” Theta P&L Heatmap
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
+// FEATURE 4  -  Theta P&L Heatmap
+// ═══════════════════════════════════════════════════════════
 function HeatmapSection({ S, K, calendarDays, r, sigma, optionType, q, marketPremium }) {
   const bsmPremium = premiumAt(S, K, calendarDays / 365, r, sigma, optionType, q);
   const costBasis = marketPremium > 0 ? marketPremium : bsmPremium;
@@ -919,7 +919,7 @@ function HeatmapSection({ S, K, calendarDays, r, sigma, optionType, q, marketPre
         <h2 className="text-lg font-semibold text-[#e6edf3]">P&L Heatmap</h2>
       </div>
       <p className="text-xs text-[#8b949e] mb-4">
-        P&L based on {marketPremium > 0 ? `market price â‚¹${marketPremium.toFixed(2)}` : 'BSM premium'} â€” rows = days held, columns = spot price change
+        P&L based on {marketPremium > 0 ? `market price ₹${marketPremium.toFixed(2)}` : 'BSM premium'}  -  rows = days held, columns = spot price change
       </p>
 
       <div className="overflow-x-auto">
@@ -927,7 +927,7 @@ function HeatmapSection({ S, K, calendarDays, r, sigma, optionType, q, marketPre
           <thead>
             <tr>
               <th className="text-left py-2 px-1.5 text-[#8b949e] font-medium sticky left-0 bg-[#161b22] z-10">
-                Days â†“ / Spot â†’
+                Days  / Spot ...
               </th>
               {priceScenarios.map((ps) => (
                 <th key={ps.label} className="py-2 px-1 text-center text-[#8b949e] font-medium whitespace-nowrap">
@@ -974,11 +974,11 @@ function HeatmapSection({ S, K, calendarDays, r, sigma, optionType, q, marketPre
   );
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 // MAIN COMPONENT
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 export default function ThetaDecaySimulator() {
-  // â”€â”€ Inputs (own state, independent from OptionsPricer) â”€â”€
+  //  Inputs (own state, independent from OptionsPricer) 
   const [spotPrice, setSpotPrice] = useState(DEFAULTS.spotPrice);
   const [strikePrice, setStrikePrice] = useState(DEFAULTS.strikePrice);
   const [optionType, setOptionType] = useState(DEFAULTS.optionType);
@@ -989,7 +989,7 @@ export default function ThetaDecaySimulator() {
   const [marketPremium, setMarketPremium] = useState(0);
   const [chainStrikes, setChainStrikes] = useState([]);
 
-  // â”€â”€ Live data â”€â”€
+  //  Live data 
   const live = useLiveData();
 
   const handleFetchLive = useCallback(async () => {
@@ -1026,7 +1026,7 @@ export default function ThetaDecaySimulator() {
     }
   }, [chainStrikes, optionType]);
 
-  // â”€â”€ Derived â”€â”€
+  //  Derived 
   const todayStr = new Date().toISOString().split('T')[0];
   const calendarDays = useMemo(() => {
     const diff = new Date(expiryDate) - new Date(todayStr);
@@ -1036,7 +1036,7 @@ export default function ThetaDecaySimulator() {
   const isExpired = calendarDays <= 0;
   const canShow = spotPrice > 0 && strikePrice > 0 && iv > 0 && !isExpired;
 
-  // â”€â”€ BSM for summary metrics â”€â”€
+  //  BSM for summary metrics 
   const metrics = useMemo(() => {
     if (!canShow) return null;
     const T = calendarDays / 365;
@@ -1085,7 +1085,7 @@ export default function ThetaDecaySimulator() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      {/* â”€â”€ Header â”€â”€ */}
+      {/*  Header  */}
       <div className="flex items-center justify-between mb-3">
         <div>
           <h1 className="text-2xl font-bold text-[#e6edf3] flex items-center gap-2">
@@ -1108,13 +1108,13 @@ export default function ThetaDecaySimulator() {
         </button>
       </div>
 
-      {/* â”€â”€ Live data status â”€â”€ */}
+      {/*  Live data status  */}
       {(live.data || live.error) && (
         <div className="flex items-center gap-3 mb-3 text-xs">
           {live.data && (
             <span className="flex items-center gap-1.5 text-[#3fb950]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950] animate-pulse" />
-              NIFTY: â‚¹{live.data.spot?.toFixed(2)}
+              NIFTY: ₹{live.data.spot?.toFixed(2)}
             </span>
           )}
           {live.error && (
@@ -1125,18 +1125,18 @@ export default function ThetaDecaySimulator() {
         </div>
       )}
 
-      {/* â”€â”€ Parameter Bar â”€â”€ */}
+      {/*  Parameter Bar  */}
       <div className="card p-4 mb-5">
         <span className="text-xs font-medium text-[#8b949e] uppercase tracking-wider block mb-3">Parameters</span>
         <div className="flex flex-wrap gap-3 items-end">
           {/* Spot */}
           <div className="flex-1 min-w-[120px]">
-            <label className="block text-xs font-medium text-[#e6edf3] mb-1">Spot Price (â‚¹)</label>
+            <label className="block text-xs font-medium text-[#e6edf3] mb-1">Spot Price (₹)</label>
             <input type="number" value={spotPrice} onChange={(e) => setSpotPrice(Number(e.target.value))} />
           </div>
-          {/* Strike â€” with chain dropdown if available */}
+          {/* Strike  -  with chain dropdown if available */}
           <div className="flex-1 min-w-[140px]">
-            <label className="block text-xs font-medium text-[#e6edf3] mb-1">Strike Price (â‚¹)</label>
+            <label className="block text-xs font-medium text-[#e6edf3] mb-1">Strike Price (₹)</label>
             {chainStrikes.length > 0 ? (
               <select
                 value={strikePrice}
@@ -1206,7 +1206,7 @@ export default function ThetaDecaySimulator() {
           {/* Market Premium */}
           <div className="flex-1 min-w-[140px]">
             <label className="block text-xs font-medium text-[#a371f7] mb-1 flex items-center gap-1">
-              <DollarSign size={12} /> Market Premium (â‚¹)
+              <DollarSign size={12} /> Market Premium (₹)
             </label>
             <input
               type="number"
@@ -1227,7 +1227,7 @@ export default function ThetaDecaySimulator() {
         </div>
       </div>
 
-      {/* â”€â”€ Expired Banner â”€â”€ */}
+      {/*  Expired Banner  */}
       {isExpired && expiryDate && (
         <div className="mb-4 p-3 rounded-xl bg-[#f8514915] border border-[#f8514940] flex items-center gap-2">
           <AlertTriangle size={16} className="text-[#f85149] shrink-0" />
@@ -1235,10 +1235,10 @@ export default function ThetaDecaySimulator() {
         </div>
       )}
 
-      {/* â”€â”€ Content (only when valid) â”€â”€ */}
+      {/*  Content (only when valid)  */}
       {canShow && metrics && (
         <>
-          {/* â”€â”€ Summary Metrics â”€â”€ */}
+          {/*  Summary Metrics  */}
           <div className="flex flex-wrap gap-3 mb-5">
             <MetricCard
               icon={Clock}
@@ -1251,7 +1251,7 @@ export default function ThetaDecaySimulator() {
               icon={TrendingDown}
               iconColor="#f85149"
               label="Theta per Day"
-              value={`-â‚¹${metrics.thetaPerDay.toFixed(2)}`}
+              value={`-₹${metrics.thetaPerDay.toFixed(2)}`}
               subtext={`${metrics.thetaPctOfPremium.toFixed(1)}% of premium/day`}
             />
             <MetricCard
@@ -1274,26 +1274,26 @@ export default function ThetaDecaySimulator() {
                 iconColor="#a371f7"
                 label={metrics.mispricing >= 0 ? 'Overpriced' : 'Underpriced'}
                 value={fmt(Math.abs(metrics.mispricing))}
-                subtext={`Market â‚¹${marketPremium.toFixed(2)} vs BSM â‚¹${metrics.premium.toFixed(2)} (${Math.abs(metrics.mispricingPct).toFixed(1)}%)`}
+                subtext={`Market ₹${marketPremium.toFixed(2)} vs BSM ₹${metrics.premium.toFixed(2)} (${Math.abs(metrics.mispricingPct).toFixed(1)}%)`}
               />
             )}
             <MetricCard
               icon={TrendingDown}
               iconColor="#f0883e"
               label="Break-Even Move"
-              value={`â‚¹${metrics.breakEvenMove.toFixed(1)}/day`}
+              value={`₹${metrics.breakEvenMove.toFixed(1)}/day`}
               subtext="Spot must move this much to offset theta"
             />
           </div>
 
-          {/* â”€â”€ What-If Scenario Simulator â”€â”€ */}
+          {/*  What-If Scenario Simulator  */}
           <WhatIfScenarioSection
             S={spotPrice} K={strikePrice} calendarDays={calendarDays}
             r={metrics.r} sigma={metrics.sigma} optionType={optionType} q={metrics.q}
             marketPremium={marketPremium} bsmPremium={metrics.premium}
           />
 
-          {/* â”€â”€ Feature 1: Decay Curve â”€â”€ */}
+          {/*  Feature 1: Decay Curve  */}
           <div className="mb-5">
             <DecayCurveSection
               S={spotPrice} K={strikePrice} calendarDays={calendarDays}
@@ -1302,7 +1302,7 @@ export default function ThetaDecaySimulator() {
             />
           </div>
 
-          {/* â”€â”€ Feature 3 + 4: Multi-Strike + Heatmap side by side on desktop â”€â”€ */}
+          {/*  Feature 3 + 4: Multi-Strike + Heatmap side by side on desktop  */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
             <MultiStrikeSection
               S={spotPrice} K={strikePrice} calendarDays={calendarDays}
@@ -1315,7 +1315,7 @@ export default function ThetaDecaySimulator() {
             />
           </div>
 
-          {/* â”€â”€ Feature 2: Daily Breakdown â”€â”€ */}
+          {/*  Feature 2: Daily Breakdown  */}
           <div className="mb-5">
             <DailyBreakdownSection
               S={spotPrice} K={strikePrice} calendarDays={calendarDays}
@@ -1326,7 +1326,7 @@ export default function ThetaDecaySimulator() {
         </>
       )}
 
-      {/* â”€â”€ Footer â”€â”€ */}
+      {/*  Footer  */}
       <footer className="text-center py-6 border-t border-[#30363d]">
         <p className="text-xs text-[#8b949e] max-w-2xl mx-auto leading-relaxed">
           Theta decay simulation assumes constant spot price and implied volatility.
