@@ -524,7 +524,7 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
         {hasMarket
           ? <>
               <span className="text-[#e3b341]">Yellow</span> = BSM theoretical (your IV {(sigma * 100).toFixed(1)}%)
-              {' Â· '}
+              {' · '}
               <span className="text-[#a371f7]">Purple</span> = market-implied decay (IV {impliedIV ? (impliedIV * 100).toFixed(1) : '?'}%)
             </>
           : 'How your option premium erodes as time passes  -  assuming spot and IV stay constant'
@@ -643,7 +643,7 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
               <span className="text-[#a371f7] font-mono">Market: {fmt(hoverData.marketPremium)}</span>
             )}
             <span className="text-[#f85149] font-mono">Θ: {hoverData.theta.toFixed(2)}/day</span>
-            <span className="text-[#58a6ff] font-mono">Î”: {hoverData.delta.toFixed(4)}</span>
+            <span className="text-[#58a6ff] font-mono">Δ: {hoverData.delta.toFixed(4)}</span>
             {hoverData.marketPremium !== null && (
               <span className={`font-mono ${hoverData.marketPremium >= marketPremium ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
                 Real P&L: {fmt(hoverData.marketPremium - marketPremium).replace('₹-', '-₹')}
