@@ -8,8 +8,16 @@ import {
   Radio, Loader2, AlertTriangle, DollarSign, ArrowUpDown,
   Activity, Timer, Layers,
 } from 'lucide-react';
-import { calculateBSM, premiumAt, generateThetaDecayCurve, countTradingDays, getDefaultExpiry } from './bsm.js';
+import {
+  calculateBSM,
+  premiumAt,
+  generateThetaDecayCurve,
+  countTradingDays,
+  getDefaultExpiry,
+  solveImpliedIV,
+} from './bsm.js';
 import { useLiveData, findATMStrike, nseToISODate } from './useLiveData.js';
+import LiveFetchBar from './components/LiveFetchBar.jsx';
 
 function fmt(v) { return '₹' + v.toFixed(2); }
 function sign(v) { return v >= 0 ? '+' : ''; }
@@ -400,30 +408,6 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
 }
 
 
-// ═══════════════════════════════════════════════════════════
-// IMPLIED IV SOLVER (Newton-Raphson)
-// Back-solves the IV that produces the given market premium.
-// ═══════════════════════════════════════════════════════════
-function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0) {
-  if (T <= 0 || marketPrice <= 0) return null;
-  const intrinsic = optionType === 'CALL' ? Math.max(S - K, 0) : Math.max(K - S, 0);
-  if (marketPrice < intrinsic) return null;
-
-  let sigma = 0.20; // initial guess: 20%
-  for (let i = 0; i < 50; i++) {
-    const bsm = calculateBSM(S, K, T, r, sigma, optionType, q);
-    if (!bsm) return null;
-    const diff = bsm.premium - marketPrice;
-    // vega is per 1% IV change, so derivative w.r.t. sigma = vega * 100
-    const vegaSigma = bsm.vega * 100;
-    if (Math.abs(vegaSigma) < 1e-12) break;
-    sigma -= diff / vegaSigma;
-    if (sigma <= 0.001) sigma = 0.001;
-    if (sigma > 5) sigma = 5;
-    if (Math.abs(diff) < 0.001) break;
-  }
-  return sigma;
-}
 
 // ═══════════════════════════════════════════════════════════
 // FEATURE 1  -  Interactive Decay Curve (Dual: BSM + Market)
@@ -992,8 +976,7 @@ export default function ThetaDecaySimulator() {
   //  Live data 
   const live = useLiveData();
 
-  const handleFetchLive = useCallback(async () => {
-    const chain = await live.fetchNow('NIFTY');
+  const handleDataFetched = useCallback((chain, sym) => {
     if (!chain) return;
     if (chain.spot) setSpotPrice(Math.round(chain.spot * 100) / 100);
     const expiries = chain.expiryDates || [];
@@ -1012,7 +995,7 @@ export default function ThetaDecaySimulator() {
         if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
       }
     }
-  }, [live, optionType]);
+  }, [optionType]);
 
   // When user picks a different strike from chain dropdown, update IV + market premium
   const handleChainStrikeChange = useCallback((newStrike) => {
@@ -1094,36 +1077,9 @@ export default function ThetaDecaySimulator() {
           </h1>
           <p className="text-xs text-[#8b949e] mt-0.5">Visualize how time erodes option premiums</p>
         </div>
-        <button
-          onClick={handleFetchLive}
-          disabled={live.isLoading}
-          className={`flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg font-semibold transition-all cursor-pointer ${
-            live.isLoading
-              ? 'bg-[#30363d] text-[#8b949e] cursor-wait'
-              : 'bg-gradient-to-r from-[#238636] to-[#2ea043] text-white hover:from-[#2ea043] hover:to-[#3fb950] shadow-md shadow-[#23863620]'
-          }`}
-        >
-          {live.isLoading ? <Loader2 size={14} className="animate-spin" /> : <Radio size={14} />}
-          {live.isLoading ? 'Fetching...' : 'Fetch Live'}
-        </button>
       </div>
 
-      {/*  Live data status  */}
-      {(live.data || live.error) && (
-        <div className="flex items-center gap-3 mb-3 text-xs">
-          {live.data && (
-            <span className="flex items-center gap-1.5 text-[#3fb950]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950] animate-pulse" />
-              NIFTY: ₹{live.data.spot?.toFixed(2)}
-            </span>
-          )}
-          {live.error && (
-            <span className="flex items-center gap-1 text-[#f85149]">
-              <AlertTriangle size={12} /> {live.error}
-            </span>
-          )}
-        </div>
-      )}
+      <LiveFetchBar onFetchComplete={handleDataFetched} />
 
       {/*  Parameter Bar  */}
       <div className="card p-4 mb-5">

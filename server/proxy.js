@@ -1,237 +1,234 @@
-/**
- * NSE Proxy Server
- * Lightweight Express server that proxies requests to NSE India API.
- *
- * Endpoints:
- *   GET /api/nifty-spot                    → { spot, timestamp }
- *   GET /api/option-chain?symbol=NIFTY     → parsed option chain
- *   GET /api/health                        → { ok, cacheAge }
- *
- * Features:
- *   - Session cookie management (auto-refresh)
- *   - Response caching (30s default)
- *   - Rate limiting (max 1 NSE request per 3s)
- *   - Graceful error handling with stale cache fallback
- */
-
 import express from 'express';
+import cors from 'cors';
+import path from 'path';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { existsSync } from 'fs';
-import { nseApiFetch, refreshSession, closeBrowser } from './nse-session.js';
+import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
+import { initScripMaster, getUnderlyingToken, getAvailableExpiries, getOptionTokens } from './scripMaster.js';
+import { solveImpliedIV } from '../src/bsm.js';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ── CORS (allow Vite dev server + any origin) ──
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-  next();
+app.use(cors());
+
+// Serve static frontend from 'dist' directory in production
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Initialize Scrip Master on startup
+initScripMaster().catch(err => {
+  console.error("Failed to initialize Scrip Master:", err);
 });
 
-// ── Serve static frontend in production ──
-const distPath = join(__dirname, '..', 'dist');
-if (existsSync(distPath)) {
-  console.log('[Proxy] Serving static frontend from', distPath);
-  app.use(express.static(distPath));
-}
-
-// ── Cache store ──
-const cache = {};
-const CACHE_TTL_MS = 15 * 1000; // 15 seconds
-const MIN_REQUEST_INTERVAL_MS = 3000; // Rate limit: 1 request per 3s
-let lastNseRequestTime = 0;
-
-function getCached(key) {
-  const entry = cache[key];
-  if (!entry) return null;
-  const age = Date.now() - entry.timestamp;
-  return { data: entry.data, age, stale: age > CACHE_TTL_MS };
-}
-
-function setCache(key, data) {
-  cache[key] = { data, timestamp: Date.now() };
-}
-
-async function rateLimitedFetch(path) {
-  const now = Date.now();
-  const elapsed = now - lastNseRequestTime;
-  if (elapsed < MIN_REQUEST_INTERVAL_MS) {
-    await new Promise(r => setTimeout(r, MIN_REQUEST_INTERVAL_MS - elapsed));
-  }
-  lastNseRequestTime = Date.now();
-  return nseApiFetch(path);
-}
-
-// ── Normalize NSE expiry date formats ──
-// CE.expiryDate = "26-05-2026" (DD-MM-YYYY)
-// records.expiryDates = ["26-May-2026"] (DD-Mon-YYYY)
-// We normalize to DD-Mon-YYYY to match the expiryDates array
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-function normalizeExpiry(dateStr) {
-  if (!dateStr) return dateStr;
-  // If already in DD-Mon-YYYY format, return as-is
-  if (/^\d{2}-[A-Za-z]{3}-\d{4}$/.test(dateStr)) return dateStr;
-  // Convert DD-MM-YYYY to DD-Mon-YYYY
-  const [dd, mm, yyyy] = dateStr.split('-');
-  const monthIdx = parseInt(mm, 10) - 1;
-  if (monthIdx >= 0 && monthIdx < 12) {
-    return `${dd}-${MONTHS[monthIdx]}-${yyyy}`;
-  }
-  return dateStr;
-}
-
-// ── Parse NSE option chain into clean format ──
-function parseOptionChain(raw) {
-  const records = raw?.records;
-  if (!records) throw new Error('Invalid NSE response: no records field');
-
-  const spot = records.underlyingValue;
-  const expiryDates = records.expiryDates || [];
-  const data = records.data || [];
-  const timestamp = records.timestamp || new Date().toISOString();
-
-  // Group by expiry (normalized to DD-Mon-YYYY)
-  const byExpiry = {};
-  for (const row of data) {
-    const rawExp = row.CE?.expiryDate || row.PE?.expiryDate;
-    if (!rawExp) continue;
-    const exp = normalizeExpiry(rawExp);
-    if (!byExpiry[exp]) byExpiry[exp] = [];
-
-    const strike = {
-      strikePrice: row.strikePrice,
-      call: row.CE ? {
-        ltp: row.CE.lastPrice,
-        iv: row.CE.impliedVolatility,
-        oi: row.CE.openInterest,
-        oiChange: row.CE.changeinOpenInterest,
-        volume: row.CE.totalTradedVolume,
-        bid: row.CE.buyPrice1,
-        ask: row.CE.sellPrice1,
-      } : null,
-      put: row.PE ? {
-        ltp: row.PE.lastPrice,
-        iv: row.PE.impliedVolatility,
-        oi: row.PE.openInterest,
-        oiChange: row.PE.changeinOpenInterest,
-        volume: row.PE.totalTradedVolume,
-        bid: row.PE.buyPrice1,
-        ask: row.PE.sellPrice1,
-      } : null,
-    };
-    byExpiry[exp].push(strike);
-  }
-
-  return { spot, expiryDates, byExpiry, timestamp };
-}
-
-// ── Endpoints ──
-
-// Health check
-app.get('/api/health', (req, res) => {
-  const chainCache = getCached('option-chain-NIFTY');
-  res.json({
-    ok: true,
-    cacheAge: chainCache ? Math.round(chainCache.age / 1000) + 's' : 'empty',
-    stale: chainCache?.stale ?? null,
-  });
+// Authenticate on startup to test credentials
+getAngelSession().then(() => {
+  console.log("Angel One connection established.");
+}).catch(err => {
+  console.error("Angel One initial auth failed:", err.message);
 });
 
-// NIFTY spot price
-app.get('/api/nifty-spot', async (req, res) => {
-  try {
-    const cached = getCached('option-chain-NIFTY');
-    if (cached && !cached.stale) {
-      return res.json({ spot: cached.data.spot, timestamp: cached.data.timestamp, cached: true });
-    }
+// Cache
+let cache = {
+  data: null,
+  timestamp: 0,
+  symbol: null
+};
 
-    const raw = await rateLimitedFetch('/api/option-chain-indices?symbol=NIFTY');
-    const parsed = parseOptionChain(raw);
-    setCache('option-chain-NIFTY', parsed);
-
-    res.json({ spot: parsed.spot, timestamp: parsed.timestamp, cached: false });
-  } catch (err) {
-    console.error('[/api/nifty-spot] Error:', err.message);
-    // Fallback to stale cache
-    const stale = getCached('option-chain-NIFTY');
-    if (stale) {
-      return res.json({ spot: stale.data.spot, timestamp: stale.data.timestamp, cached: true, stale: true });
-    }
-    res.status(502).json({ error: 'Failed to fetch NIFTY spot', detail: err.message });
-  }
-});
-
-// Full option chain
 app.get('/api/option-chain', async (req, res) => {
-  const symbol = (req.query.symbol || 'NIFTY').toUpperCase();
+  const symbol = req.query.symbol?.toUpperCase() || 'NIFTY';
   const force = req.query.force === 'true';
-  const cacheKey = `option-chain-${symbol}`;
+
+  console.log(`[/api/option-chain] Request for ${symbol}`);
+
+  if (!force && cache.data && cache.symbol === symbol && (Date.now() - cache.timestamp < 15000)) {
+    return res.json(cache.data);
+  }
 
   try {
-    // Skip cache if force=true
-    if (!force) {
-      const cached = getCached(cacheKey);
-      if (cached && !cached.stale) {
-        console.log(`[/api/option-chain] Serving ${symbol} from cache (age: ${Math.round(cached.age / 1000)}s)`);
-        return res.json({ ...cached.data, cached: true, cacheAge: Math.round(cached.age / 1000) });
+    const underlyingToken = getUnderlyingToken(symbol);
+    if (!underlyingToken) {
+      return res.status(404).json({ error: `Underlying token not found for ${symbol}` });
+    }
+
+    // 1. Fetch Spot Price
+    const spotQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
+      mode: 'LTP',
+      exchangeTokens: {
+        NSE: [underlyingToken]
       }
-    } else {
-      console.log(`[/api/option-chain] Force refresh requested for ${symbol}`);
+    });
+
+    const spotData = spotQuote?.data?.fetched?.[0];
+    if (!spotData) {
+      // Fallback for indices which might be under NSE or NFO
+      return res.status(500).json({ error: `Could not fetch spot price for ${symbol}` });
+    }
+    
+    const spotPrice = spotData.ltp;
+
+    // 2. Find Nearest Expiry
+    const expiries = getAvailableExpiries(symbol);
+    if (expiries.length === 0) {
+      return res.status(404).json({ error: `No expiries found for ${symbol}` });
+    }
+    const nearestExpiry = expiries[0]; // Already sorted chronologically
+
+    // 3. Find Options Tokens around Spot
+    const optionsForExpiry = getOptionTokens(symbol, nearestExpiry);
+    
+    // Sort by strike distance to spot to get the nearest strikes
+    const optionsWithStrike = optionsForExpiry.map(opt => ({
+      ...opt,
+      parsedStrike: parseFloat(opt.strike) / 100 // SmartAPI strikes have extra 00
+    }));
+
+    // Group by strike
+    const strikesMap = {};
+    optionsWithStrike.forEach(opt => {
+      const k = opt.parsedStrike;
+      if (!strikesMap[k]) strikesMap[k] = {};
+      if (opt.symbol.endsWith('CE')) strikesMap[k].CE = opt;
+      if (opt.symbol.endsWith('PE')) strikesMap[k].PE = opt;
+    });
+
+    // Get strikes sorted by distance to spot
+    const allStrikes = Object.keys(strikesMap).map(Number).sort((a, b) => a - b);
+    
+    // Filter to ±15 strikes around ATM
+    let closestIndex = 0;
+    let minDiff = Infinity;
+    allStrikes.forEach((k, i) => {
+      const diff = Math.abs(k - spotPrice);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIndex = i;
+      }
+    });
+
+    const startIndex = Math.max(0, closestIndex - 15);
+    const endIndex = Math.min(allStrikes.length - 1, closestIndex + 15);
+    const relevantStrikes = allStrikes.slice(startIndex, endIndex + 1);
+
+    const tokensToFetch = [];
+    relevantStrikes.forEach(k => {
+      if (strikesMap[k].CE) tokensToFetch.push(strikesMap[k].CE.token);
+      if (strikesMap[k].PE) tokensToFetch.push(strikesMap[k].PE.token);
+    });
+
+    // 4. Fetch Options Data (Batch up to 50 tokens at a time)
+    // We have at most 31 strikes * 2 = 62 tokens, so 2 batches
+    const fetchedOptions = [];
+    for (let i = 0; i < tokensToFetch.length; i += 50) {
+      const batch = tokensToFetch.slice(i, i + 50);
+      const optQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
+        mode: 'FULL',
+        exchangeTokens: {
+          NFO: batch
+        }
+      });
+      if (optQuote?.data?.fetched) {
+        fetchedOptions.push(...optQuote.data.fetched);
+      }
     }
 
-    // NSE indices — everything else is an equity
-    const INDICES = new Set([
-      'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT',
-      'NIFTY50', 'NIFTYNXT50', 'NIFTYBANK',
-    ]);
-    const apiPath = INDICES.has(symbol)
-      ? `/api/option-chain-indices?symbol=${symbol}`
-      : `/api/option-chain-equities?symbol=${symbol}`;
+    // Map fetched options by token for fast lookup
+    const optQuoteMap = {};
+    fetchedOptions.forEach(opt => {
+      optQuoteMap[opt.symbolToken] = opt;
+    });
 
-    const raw = await rateLimitedFetch(apiPath);
-    const parsed = parseOptionChain(raw);
-    setCache(cacheKey, parsed);
+    // 5. Construct NSE-like Response
+    // Convert Angel One Expiry (DDMMMYYYY e.g. 25MAY2026) to NSE format (DD-MMM-YYYY e.g. 25-May-2026)
+    const formatExpiry = (angelExp) => {
+      if (!angelExp || angelExp.length < 9) return angelExp;
+      const day = angelExp.slice(0, 2);
+      const month = angelExp.slice(2, 5);
+      const year = angelExp.slice(5);
+      // Capitalize first letter of month, rest lowercase
+      const formattedMonth = month.charAt(0) + month.slice(1).toLowerCase();
+      return `${day}-${formattedMonth}-${year}`;
+    };
 
-    console.log(`[/api/option-chain] Fresh ${symbol} data: spot=${parsed.spot}, timestamp=${parsed.timestamp}`);
-    res.json({ ...parsed, cached: false });
-  } catch (err) {
-    console.error(`[/api/option-chain] Error for ${symbol}:`, err.message);
-    const stale = getCached(cacheKey);
-    if (stale) {
-      return res.json({ ...stale.data, cached: true, stale: true, cacheAge: Math.round(stale.age / 1000) });
-    }
-    res.status(502).json({ error: `Failed to fetch option chain for ${symbol}`, detail: err.message });
+    const nseNearestExpiry = formatExpiry(nearestExpiry);
+    const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+    const parts = nseNearestExpiry.split('-');
+    const expiryDateObj = new Date(parseInt(parts[2]), months[parts[1]], parseInt(parts[0]));
+    
+    // T for IV calculation (calendar days / 365)
+    // If expiry is today, T might be 0, so bound to a minimum of 0.5 days to avoid Infinity IV
+    const T = Math.max(0.5, (expiryDateObj.getTime() - Date.now()) / 86400000) / 365;
+
+    const strikeRecords = relevantStrikes.map(strike => {
+      const record = { strikePrice: strike, call: null, put: null };
+      
+      const ceToken = strikesMap[strike].CE?.token;
+      const peToken = strikesMap[strike].PE?.token;
+      
+      const ceQuote = ceToken ? optQuoteMap[ceToken] : null;
+      const peQuote = peToken ? optQuoteMap[peToken] : null;
+
+      if (ceQuote) {
+        const bestBuy = ceQuote.depth?.buy?.[0];
+        const bestSell = ceQuote.depth?.sell?.[0];
+        
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, ceQuote.ltp, 'CALL', 0.012) || 0.15;
+        
+        record.call = {
+          ltp: ceQuote.ltp,
+          oi: ceQuote.openInterest,
+          bidPrice: bestBuy?.price || 0,
+          bidQty: bestBuy?.quantity || 0,
+          askPrice: bestSell?.price || 0,
+          askQty: bestSell?.quantity || 0,
+          iv: calcIV * 100 
+        };
+      }
+      
+      if (peQuote) {
+        const bestBuy = peQuote.depth?.buy?.[0];
+        const bestSell = peQuote.depth?.sell?.[0];
+
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, peQuote.ltp, 'PUT', 0.012) || 0.15;
+
+        record.put = {
+          ltp: peQuote.ltp,
+          oi: peQuote.openInterest,
+          bidPrice: bestBuy?.price || 0,
+          bidQty: bestBuy?.quantity || 0,
+          askPrice: bestSell?.price || 0,
+          askQty: bestSell?.quantity || 0,
+          iv: calcIV * 100
+        };
+      }
+      
+      return record;
+    });
+
+    const finalResponse = {
+      spot: spotPrice,
+      timestamp: new Date().toISOString(),
+      expiryDates: expiries.map(formatExpiry),
+      byExpiry: {
+        [nseNearestExpiry]: strikeRecords
+      }
+    };
+
+    cache = { data: finalResponse, timestamp: Date.now(), symbol };
+    res.json(finalResponse);
+  } catch (error) {
+    console.error(`[/api/option-chain] Error for ${symbol}:`, error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ── SPA fallback: serve index.html for all non-API routes (production) ──
-if (existsSync(distPath)) {
-  app.get('{*path}', (req, res) => {
-    res.sendFile(join(distPath, 'index.html'));
-  });
-}
+// All other GET requests not handled by API will return the React app
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
 
-// ── Startup ──
-async function start() {
-  console.log('[Proxy] Initializing NSE session...');
-  const ok = await refreshSession();
-  if (!ok) {
-    console.warn('[Proxy] Initial session failed — will retry on first request');
-  }
-
-  app.listen(PORT, () => {
-    console.log(`[Proxy] NSE proxy server running on http://localhost:${PORT}`);
-    console.log(`[Proxy] Endpoints:`);
-    console.log(`  GET /api/health`);
-    console.log(`  GET /api/nifty-spot`);
-    console.log(`  GET /api/option-chain?symbol=NIFTY`);
-  });
-}
-
-start();
+app.listen(PORT, () => {
+  console.log(`[Proxy] Server running on port ${PORT}`);
+  console.log(`[Proxy] Using Angel One SmartAPI`);
+});

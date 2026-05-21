@@ -7,6 +7,7 @@ import { calculateBSM, countTradingDays, getDefaultExpiry } from './bsm.js';
 import { useLiveData, findATMStrike, nseToISODate } from './useLiveData.js';
 import GreeksDashboard from './GreeksDashboard.jsx';
 import ScenarioSimulator from './ScenarioSimulator.jsx';
+import LiveFetchBar from './components/LiveFetchBar.jsx';
 
 function fmt(v) { return '₹' + v.toFixed(2); }
 
@@ -32,21 +33,15 @@ export default function OptionsPricer() {
   const [openInterest, setOpenInterest] = useState('');
   const [selectedExpiry, setSelectedExpiry] = useState(null); // NSE format expiry
   const [chainStrikes, setChainStrikes] = useState([]); // strikes from chain for current expiry
-  const [symbol, setSymbol] = useState('NIFTY'); // active ticker symbol
 
-  // ── Results state ──
   const [results, setResults] = useState(null);
   const [calcParams, setCalcParams] = useState(null);
   const [isFresh, setIsFresh] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // ── Live Data ──
   const live = useLiveData();
 
-  const handleFetchLive = useCallback(async () => {
-    const sym = symbol.trim().toUpperCase();
-    if (!sym) return;
-    const chain = await live.fetchNow(sym);
+  const handleDataFetched = useCallback((chain, sym) => {
     if (!chain) return;
 
     // Set spot price
@@ -75,7 +70,7 @@ export default function OptionsPricer() {
         if (oi) setOpenInterest(oi.toLocaleString());
       }
     }
-  }, [live, optionType, symbol]);
+  }, [optionType]);
 
   // When user picks a different strike from the chain dropdown, update IV
   const handleChainStrikeChange = useCallback((newStrike) => {
@@ -104,9 +99,7 @@ export default function OptionsPricer() {
     }
   }, [live.data, spotPrice, optionType]);
 
-  const timeSinceUpdate = live.lastUpdate
-    ? Math.round((Date.now() - live.lastUpdate.getTime()) / 1000)
-    : null;
+
 
   // ── Derived ──
   // todayStr changes once per calendar day, forcing memos to recompute
@@ -223,69 +216,7 @@ export default function OptionsPricer() {
       </div>
 
       {/* ── Live Data Bar ── */}
-      <div className="card p-3 mb-5 flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          {/* Symbol Input */}
-          <div className="relative">
-            <input
-              id="input-symbol"
-              type="text"
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleFetchLive(); }}
-              placeholder="NIFTY"
-              className="w-[120px] text-xs px-3 py-2 rounded-lg bg-[#0d1117] border border-[#30363d] text-[#e6edf3] font-mono font-semibold tracking-wide focus:border-[#58a6ff] focus:outline-none transition-colors uppercase placeholder-[#484f58]"
-            />
-          </div>
-
-          <button
-            id="btn-fetch-live"
-            onClick={handleFetchLive}
-            disabled={live.isLoading || !symbol.trim()}
-            className={`flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg font-semibold transition-all cursor-pointer ${
-              live.isLoading
-                ? 'bg-[#30363d] text-[#8b949e] cursor-wait'
-                : 'bg-gradient-to-r from-[#238636] to-[#2ea043] text-white hover:from-[#2ea043] hover:to-[#3fb950] shadow-md shadow-[#23863620]'
-            }`}
-          >
-            {live.isLoading ? <Loader2 size={14} className="animate-spin" /> : <Radio size={14} />}
-            {live.isLoading ? 'Fetching...' : 'Fetch Live'}
-          </button>
-
-          <button
-            id="btn-auto-refresh"
-            onClick={() => live.isLive ? live.stopAutoRefresh() : live.startAutoRefresh(30000, symbol.trim().toUpperCase() || 'NIFTY')}
-            className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg font-medium transition-all cursor-pointer border ${
-              live.isLive
-                ? 'border-[#3fb95040] bg-[#3fb95010] text-[#3fb950]'
-                : 'border-[#30363d] text-[#8b949e] hover:text-[#e6edf3] hover:border-[#58a6ff]'
-            }`}
-          >
-            {live.isLive ? <Wifi size={13} /> : <WifiOff size={13} />}
-            {live.isLive ? 'Auto: ON' : 'Auto: OFF'}
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 text-xs">
-          {live.data && (
-            <span className="flex items-center gap-1.5 text-[#3fb950]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950] animate-pulse" />
-              {symbol.trim().toUpperCase() || 'NIFTY'}: ₹{live.data.spot?.toFixed(2)}
-            </span>
-          )}
-          {live.lastUpdate && (
-            <span className="text-[#8b949e]">
-              Updated {timeSinceUpdate}s ago
-            </span>
-          )}
-          {live.error && (
-            <span className="flex items-center gap-1 text-[#f85149]">
-              <AlertTriangle size={12} />
-              {live.error}
-            </span>
-          )}
-        </div>
-      </div>
+      <LiveFetchBar onFetchComplete={handleDataFetched} />
 
       {/* ── Expired banner ── */}
       {isExpired && expiryDate && (

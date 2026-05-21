@@ -31,16 +31,11 @@ Built with React 19, Vite 8, Recharts, and a Node.js proxy with Puppeteer for li
 
 ### 🧩 Options Strategies Builder
 
-- **29 Pre-built Strategies** — instantly load standard setups spanning Single-Leg, Vertical Spreads, Neutral/Volatility, Calendar/Diagonal, Ratio Spreads, and Synthetic combinations.
-- **Custom Strategy Sandbox** — build arbitrary structures by adding/removing legs (Call, Put, or Spot), editing strikes, and adjusting quantities. Save them locally to use later.
-- **Advanced Math Modeling** — uses exact BSM pricing across legs to model current P&L, 50% DTE P&L, and expiry payoff curves.
-- **Probability Analysis** — calculates the Probability of Profit (PoP) and Expected Value (EV) by integrating a lognormal distribution of the underlying asset.
-- **Multi-Strategy Comparison** — select up to 3 different strategies and overlay their payoff graphs on a single chart with side-by-side risk/reward metrics.
-
-### 🔧 Technical Highlights
-
-- **Abramowitz & Stegun CDF** — uses the Horner method approximation (max error < 7.5×10⁻⁸) for the cumulative normal distribution
-- **Newton-Raphson IV solver** — iteratively solves for implied volatility from market prices with convergence tolerance of 1×10⁻⁶
+1. **Data Source Architecture**: The options market data is fetched through the official **Angel One SmartAPI**, providing robust, low-latency, and authenticated access to the entire F&O segment without scraping.
+2. **Options Strategy Builder**: Visual payoff charts and Greek projections for 29 built-in standard options strategies and custom multi-leg positions.
+3. **Advanced Greek Engine**: Delta, Gamma, Theta, Vega, and Rho calculated locally with extreme precision.
+4. **Local Newton-Raphson Solver**: Calculates implied volatility dynamically from live market premiums when IV is not directly provided by the exchange feed.
+5. **Fuzzy-Search Ticker Autocomplete**: Instant search and recommendation system for all 185+ NSE F&O indices and equities.
 - **No external math libraries** — all BSM calculations are pure JavaScript with zero dependencies
 - **Responsive design** — works on desktop, tablet, and mobile
 - **Dark theme** — sleek dark UI with glassmorphism effects
@@ -67,7 +62,7 @@ Options Pricer/
 │
 ├── server/                       # Backend (Node.js proxy)
 │   ├── proxy.js                  # Express server + caching layer
-│   └── nse-session.js            # Puppeteer session manager for NSE
+│   └── angel-api.js              # Angel One SmartAPI client
 │
 ├── Dockerfile                    # Multi-stage Docker build
 ├── render.yaml                   # Render deployment config
@@ -78,16 +73,10 @@ Options Pricer/
 ### Data Flow
 
 ```
-┌──────────────┐     ┌─────────────┐     ┌─────────────────────┐     ┌─────────────┐
-│   React UI   │────▸│  Vite Proxy  │────▸│  Express Proxy      │────▸│   NSE India  │
-│  (Browser)   │◂────│  /api/*      │◂────│  + Puppeteer Cache   │◂────│   Website    │
-└──────────────┘     └─────────────┘     └─────────────────────┘     └─────────────┘
-                                              │
-                                              ▼
-                                     ┌─────────────────┐
-                                     │  Headless Chrome  │
-                                     │  (intercepts XHR) │
-                                     └─────────────────┘
+┌──────────────┐     ┌─────────────┐     ┌─────────────────────┐     ┌──────────────────┐
+│   React UI   │────▸│  Vite Proxy  │────▸│  Express Proxy      │────▸│ Angel One SmartAPI│
+│  (Browser)   │◂────│  /api/*      │◂────│  + SmartAPI Client  │◂────│   (Market Data)  │
+└──────────────┘     └─────────────┘     └─────────────────────┘     └──────────────────┘
 ```
 
 ---
@@ -101,7 +90,7 @@ Options Pricer/
 | **Icons** | Lucide React | UI iconography |
 | **Styling** | TailwindCSS 4 | Utility-first CSS |
 | **Backend** | Express 5, Node.js 20 | API proxy server |
-| **Scraping** | Puppeteer 25 | Headless Chrome for NSE session management |
+| **Market Data**| Angel One SmartAPI | Official F&O data feed |
 | **Deployment** | Docker, Render | Containerized cloud deployment |
 | **Math** | Pure JavaScript | BSM engine, CDF, IV solver |
 
@@ -109,11 +98,18 @@ Options Pricer/
 
 ## Getting Started
 
-### Prerequisites
+### Setup Credentials
 
-- **Node.js 20+** (LTS recommended)
-- **npm 10+**
-- Google Chrome or Chromium (for Puppeteer — auto-downloaded on install)
+To fetch live data, the backend requires an Angel One SmartAPI account.
+
+Create a `.env` file in the root directory:
+
+```env
+ANGEL_CLIENT_ID=your_client_id
+ANGEL_PIN=your_4_digit_pin
+ANGEL_API_KEY=your_smartapi_key
+ANGEL_TOTP_SECRET=your_totp_secret
+```
 
 ### Installation
 
@@ -133,9 +129,7 @@ npm install
 npm run dev:full
 ```
 
-This starts:
-- **Vite dev server** at `http://localhost:5173` (frontend)
-- **Express proxy** at `http://localhost:3001` (NSE data proxy)
+The backend server will authenticate with SmartAPI on boot, download the daily Scrip Master JSON, and begin proxying option chain requests. (NSE data proxy)
 
 The Vite config automatically proxies `/api/*` requests to the Express server.
 
@@ -161,22 +155,6 @@ npm run preview
 ---
 
 ## How Live Data Works
-
-The app fetches real-time option chain data from NSE India (National Stock Exchange). Here's how:
-
-1. **Puppeteer** launches a headless Chrome browser
-2. For each fetch request, it opens a new tab and navigates to `nseindia.com/option-chain`
-3. A **response interceptor** captures the XHR call NSE's page makes to its internal API
-4. The intercepted JSON data (spot price, strikes, premiums, IVs) is returned to the frontend
-5. The tab is closed after each fetch (browser stays alive for subsequent requests)
-
-### Why Puppeteer?
-
-NSE India uses **Akamai Bot Manager** for anti-scraping protection. Their session cookies (`nsit`, `nseappid`, `bm_sv`) are set by client-side JavaScript — not HTTP `Set-Cookie` headers. This means:
-
-- ❌ Simple HTTP requests (fetch/axios) return `{}` — empty responses
-- ❌ Cookie extraction without JS execution fails
-- ✅ Only a real browser with full JavaScript execution can establish a valid session
 
 ### Cache Strategy
 

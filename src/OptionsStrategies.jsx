@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { STRATEGIES } from './strategyDefinitions.js';
 import { premiumAt, calculateBSM } from './bsm.js';
+import { findATMStrike } from './useLiveData.js';
 
+import LiveFetchBar from './components/LiveFetchBar.jsx';
 import StrategyCatalog from './components/strategies/StrategyCatalog.jsx';
 import LegConfigurator from './components/strategies/LegConfigurator.jsx';
 import StrategyMetricsBar from './components/strategies/StrategyMetricsBar.jsx';
@@ -42,6 +44,28 @@ export default function OptionsStrategies({ liveSpot, liveIV, riskFreeRate }) {
       setGlobalInputs(prev => ({ ...prev, spot: liveSpot }));
     }
   }, [liveSpot]);
+
+  const handleDataFetched = React.useCallback((chain, sym) => {
+    if (!chain) return;
+    const updates = {};
+    if (chain.spot) updates.spot = Math.round(chain.spot * 100) / 100;
+    
+    const expiries = chain.expiryDates || [];
+    if (expiries.length > 0) {
+      const nearestExpiry = expiries[0];
+      const atm = findATMStrike(chain, nearestExpiry, chain.spot);
+      if (atm) {
+        const relevantIV = atm.call?.iv || atm.put?.iv;
+        if (relevantIV && relevantIV > 0) {
+          updates.iv = relevantIV / 100; // IV needs to be decimal for Strategies
+        }
+      }
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      setGlobalInputs(prev => ({ ...prev, ...updates }));
+    }
+  }, []);
 
   useEffect(() => {
     if (liveIV) {
@@ -148,6 +172,8 @@ export default function OptionsStrategies({ liveSpot, liveIV, riskFreeRate }) {
           </button>
         </div>
       </div>
+
+      <LiveFetchBar onFetchComplete={handleDataFetched} />
 
       {!compareMode ? (
         <>

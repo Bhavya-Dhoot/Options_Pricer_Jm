@@ -316,3 +316,28 @@ export function probabilityOfProfit(legs, S, T, r, q, iv, steps = 1000) {
   
   return { pop, ev, pMaxProfit, pMaxLoss };
 }
+
+// ═══════════════════════════════════════════════════════════
+// IMPLIED IV SOLVER (Newton-Raphson)
+// Back-solves the IV that produces the given market premium.
+// ═══════════════════════════════════════════════════════════
+export function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0) {
+  if (T <= 0 || marketPrice <= 0) return null;
+  const intrinsic = optionType === 'CALL' ? Math.max(S - K, 0) : Math.max(K - S, 0);
+  if (marketPrice < intrinsic) return null;
+
+  let sigma = 0.20; // initial guess: 20%
+  for (let i = 0; i < 50; i++) {
+    const bsm = calculateBSM(S, K, T, r, sigma, optionType, q);
+    if (!bsm) return null;
+    const diff = bsm.premium - marketPrice;
+    // vega is per 1% IV change, so derivative w.r.t. sigma = vega * 100
+    const vegaSigma = bsm.vega * 100;
+    if (Math.abs(vegaSigma) < 1e-12) break;
+    sigma -= diff / vegaSigma;
+    if (sigma <= 0.001) sigma = 0.001;
+    if (sigma > 5) sigma = 5;
+    if (Math.abs(diff) < 0.001) break;
+  }
+  return sigma;
+}
