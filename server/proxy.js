@@ -42,7 +42,7 @@ if (existsSync(distPath)) {
 
 // ── Cache store ──
 const cache = {};
-const CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const CACHE_TTL_MS = 15 * 1000; // 15 seconds
 const MIN_REQUEST_INTERVAL_MS = 3000; // Rate limit: 1 request per 3s
 let lastNseRequestTime = 0;
 
@@ -170,12 +170,19 @@ app.get('/api/nifty-spot', async (req, res) => {
 // Full option chain
 app.get('/api/option-chain', async (req, res) => {
   const symbol = (req.query.symbol || 'NIFTY').toUpperCase();
+  const force = req.query.force === 'true';
   const cacheKey = `option-chain-${symbol}`;
 
   try {
-    const cached = getCached(cacheKey);
-    if (cached && !cached.stale) {
-      return res.json({ ...cached.data, cached: true });
+    // Skip cache if force=true
+    if (!force) {
+      const cached = getCached(cacheKey);
+      if (cached && !cached.stale) {
+        console.log(`[/api/option-chain] Serving ${symbol} from cache (age: ${Math.round(cached.age / 1000)}s)`);
+        return res.json({ ...cached.data, cached: true, cacheAge: Math.round(cached.age / 1000) });
+      }
+    } else {
+      console.log(`[/api/option-chain] Force refresh requested for ${symbol}`);
     }
 
     const apiPath = symbol === 'NIFTY' || symbol === 'BANKNIFTY' || symbol === 'FINNIFTY' || symbol === 'MIDCPNIFTY'
@@ -186,12 +193,13 @@ app.get('/api/option-chain', async (req, res) => {
     const parsed = parseOptionChain(raw);
     setCache(cacheKey, parsed);
 
+    console.log(`[/api/option-chain] Fresh ${symbol} data: spot=${parsed.spot}, timestamp=${parsed.timestamp}`);
     res.json({ ...parsed, cached: false });
   } catch (err) {
     console.error(`[/api/option-chain] Error for ${symbol}:`, err.message);
     const stale = getCached(cacheKey);
     if (stale) {
-      return res.json({ ...stale.data, cached: true, stale: true });
+      return res.json({ ...stale.data, cached: true, stale: true, cacheAge: Math.round(stale.age / 1000) });
     }
     res.status(502).json({ error: `Failed to fetch option chain for ${symbol}`, detail: err.message });
   }
@@ -199,7 +207,7 @@ app.get('/api/option-chain', async (req, res) => {
 
 // ── SPA fallback: serve index.html for all non-API routes (production) ──
 if (existsSync(distPath)) {
-  app.get('*', (req, res) => {
+  app.get('{*path}', (req, res) => {
     res.sendFile(join(distPath, 'index.html'));
   });
 }

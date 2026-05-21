@@ -1,53 +1,68 @@
 /**
- * NSE Session Manager — Intercept approach
- * 
- * Instead of making our own API call, we intercept the XHR request that 
- * the NSE website itself makes when loading the option chain page.
- * This is the most reliable method since it uses the EXACT same request
- * the website makes.
+ * NSE Session Manager — Hybrid approach
+ *
+ * 1. Launch browser (persistent)
+ * 2. For each fetch, open a new tab -> navigate to option-chain page
+ * 3. Set up response interception BEFORE navigation
+ * 4. If interception works, great. If not, try page.evaluate(fetch).
+ * 5. Close the tab after each fetch.
+ *
+ * Avoids "detached frame" by:
+ *   - NOT reusing pages across fetches
+ *   - NOT using --single-process
+ *   - Handling navigation errors gracefully
  */
 
 let browser = null;
-let page = null;
-let cachedData = {}; // { symbol: { data, timestamp } }
+let fetchInProgress = false;
 
 const BASE_URL = 'https://www.nseindia.com';
 
-/**
- * Launch the browser and intercept API responses.
- */
+async function ensureBrowser() {
+  if (browser) {
+    try {
+      // Check if browser is still alive
+      await browser.version();
+      return browser;
+    } catch {
+      browser = null;
+    }
+  }
+
+  const puppeteer = await import('puppeteer');
+  console.log('[NSE Session] Launching headless browser...');
+  browser = await puppeteer.default.launch({
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-gpu',
+    ],
+  });
+  console.log('[NSE Session] Browser ready');
+  return browser;
+}
+
+async function createPage(br) {
+  const page = await br.newPage();
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    window.chrome = { runtime: {} };
+  });
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+  );
+  await page.setViewport({ width: 1920, height: 1080 });
+  await page.setCacheEnabled(false);
+  return page;
+}
+
 export async function refreshSession() {
   try {
-    const puppeteer = await import('puppeteer');
-
-    if (!browser) {
-      console.log('[NSE Session] Launching headless browser...');
-      browser = await puppeteer.default.launch({
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-gpu',
-          '--single-process',
-        ],
-      });
-      page = await browser.newPage();
-
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        window.chrome = { runtime: {} };
-      });
-
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-      );
-      await page.setViewport({ width: 1920, height: 1080 });
-    }
-
-    console.log('[NSE Session] Browser ready');
+    await ensureBrowser();
     return true;
   } catch (err) {
     console.error('[NSE Session] Failed:', err.message);
@@ -56,88 +71,119 @@ export async function refreshSession() {
 }
 
 /**
- * Fetch option chain by navigating to the page and intercepting the API response.
+ * Fetch option chain data. Opens a fresh tab, navigates to the
+ * option-chain page, and intercepts the API response. Falls back
+ * to a direct fetch from within the page context.
  */
 export async function nseApiFetch(path) {
-  if (!page) await refreshSession();
+  if (fetchInProgress) {
+    throw new Error('A fetch is already in progress — try again shortly');
+  }
+  fetchInProgress = true;
 
-  // Determine the page URL based on the API path
-  let pageUrl = `${BASE_URL}/option-chain`;
   const symbolMatch = path.match(/symbol=(\w+)/);
   const symbol = symbolMatch ? symbolMatch[1] : 'NIFTY';
+  let page = null;
 
-  console.log(`[NSE API] Fetching ${symbol} via page navigation + intercept...`);
+  try {
+    const br = await ensureBrowser();
+    page = await createPage(br);
 
-  return new Promise(async (resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('Timed out waiting for option chain data (30s)'));
-    }, 30000);
+    console.log(`[NSE API] Fetching ${symbol} via fresh tab...`);
 
-    // Set up response interception
-    const handler = async (response) => {
-      const url = response.url();
-      if (url.includes('/api/option-chain') && url.includes(symbol)) {
-        try {
-          const json = await response.json();
-          if (json && json.records) {
-            clearTimeout(timeout);
-            page.off('response', handler);
-            console.log(`[NSE API] ✅ Intercepted ${symbol} chain: spot=${json.records.underlyingValue}, ${json.records.data?.length} strikes`);
-            cachedData[symbol] = { data: json, timestamp: Date.now() };
-            resolve(json);
-          }
-        } catch {
-          // Not JSON or incomplete, ignore
+    // ── Strategy 1: Navigate to option-chain page and intercept the XHR ──
+    const interceptedData = await new Promise((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) { done = true; resolve(null); }
+      }, 20000);
+
+      const handler = async (response) => {
+        if (done) return;
+        const url = response.url();
+        if (url.includes('/api/option-chain') && url.includes(symbol)) {
+          try {
+            const json = await response.json();
+            if (json?.records) {
+              done = true;
+              clearTimeout(timer);
+              page.off('response', handler);
+              resolve(json);
+            }
+          } catch { /* ignore */ }
         }
-      }
-    };
+      };
 
-    page.on('response', handler);
+      page.on('response', handler);
 
-    try {
-      // Navigate to the option chain page — this triggers the API call automatically
-      await page.goto(pageUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 25000,
+      page.goto(`${BASE_URL}/option-chain`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 18000,
+      }).catch((err) => {
+        console.warn(`[NSE API] Navigation warning: ${err.message.substring(0, 80)}`);
+        // Not fatal — interceptor may still work
       });
+    });
 
-      // If data wasn't intercepted during navigation, try selecting the symbol
-      // (the page might need interaction to trigger the API call)
-      await new Promise(r => setTimeout(r, 3000));
-
-      // Check if we already resolved
-      if (cachedData[symbol]?.timestamp > Date.now() - 5000) return;
-
-      // Try selecting the symbol explicitly on the page
-      console.log(`[NSE API] Waiting for data... (page loaded, checking for delayed XHR)`);
-      await new Promise(r => setTimeout(r, 5000));
-
-    } catch (navErr) {
-      // Navigation timeout is OK if we already got the data
-      if (!cachedData[symbol] || Date.now() - cachedData[symbol].timestamp > 10000) {
-        clearTimeout(timeout);
-        page.off('response', handler);
-        reject(new Error(`Navigation failed: ${navErr.message}`));
-      }
+    if (interceptedData) {
+      console.log(
+        `[NSE API] ✅ Intercepted ${symbol}: spot=${interceptedData.records.underlyingValue}, ` +
+        `${interceptedData.records.data?.length} strikes, ts=${interceptedData.records.timestamp}`
+      );
+      return interceptedData;
     }
-  });
+
+    // ── Strategy 2: Direct fetch from within the page context ──
+    console.log(`[NSE API] Interception timed out — trying direct fetch from page context...`);
+
+    const apiUrl = `${BASE_URL}${path}`;
+    const directData = await page.evaluate(async (url) => {
+      try {
+        const res = await fetch(url, {
+          credentials: 'include',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+          cache: 'no-store',
+        });
+        if (!res.ok) return { error: `HTTP ${res.status}` };
+        return await res.json();
+      } catch (e) {
+        return { error: e.message };
+      }
+    }, apiUrl);
+
+    if (directData?.records) {
+      console.log(
+        `[NSE API] ✅ Direct fetch ${symbol}: spot=${directData.records.underlyingValue}, ` +
+        `${directData.records.data?.length} strikes, ts=${directData.records.timestamp}`
+      );
+      return directData;
+    }
+
+    // Both strategies failed
+    const detail = directData?.error || JSON.stringify(directData)?.substring(0, 200);
+    throw new Error(`NSE returned no data. Direct fetch result: ${detail}`);
+
+  } catch (err) {
+    if (err.message.includes('Target closed') || err.message.includes('Session closed')) {
+      console.warn('[NSE API] Browser died — will restart on next call');
+      await closeBrowser();
+    }
+    throw err;
+  } finally {
+    if (page) {
+      try { await page.close(); } catch { /* ignore */ }
+    }
+    fetchInProgress = false;
+  }
 }
 
-/**
- * Get cached data for a symbol without making a new request.
- */
-export function getCachedData(symbol) {
-  return cachedData[symbol] || null;
-}
-
-/**
- * Cleanup.
- */
 export async function closeBrowser() {
   if (browser) {
-    await browser.close();
+    try { await browser.close(); } catch { /* ignore */ }
     browser = null;
-    page = null;
   }
 }
 

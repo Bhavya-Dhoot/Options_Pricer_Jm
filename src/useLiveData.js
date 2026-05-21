@@ -34,18 +34,25 @@ export function useLiveData() {
   const [isLive, setIsLive] = useState(false);
   const intervalRef = useRef(null);
 
-  const fetchNow = useCallback(async (symbol = 'NIFTY') => {
+  const fetchNow = useCallback(async (symbol = 'NIFTY', { force = true } = {}) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE}/option-chain?symbol=${symbol}`);
+      const params = new URLSearchParams({ symbol });
+      if (force) params.set('force', 'true');
+
+      const res = await fetch(`${API_BASE}/option-chain?${params}`, {
+        cache: 'no-store',                    // bypass browser HTTP cache
+        headers: { 'Cache-Control': 'no-cache' },
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Server returned ${res.status}`);
       }
 
       const json = await res.json();
+      console.log(`[useLiveData] Got ${symbol}: spot=${json.spot}, cached=${json.cached}, timestamp=${json.timestamp}`);
       setData(json);
       setLastUpdate(new Date());
       setIsLoading(false);
@@ -61,13 +68,13 @@ export function useLiveData() {
     stopAutoRefresh();
     setIsLive(true);
 
-    // Fetch immediately
-    fetchNow(symbol);
+    // Fetch immediately with force (user-initiated)
+    fetchNow(symbol, { force: true });
 
     intervalRef.current = setInterval(() => {
       // Only fetch during market hours to avoid unnecessary requests
       if (isMarketHours()) {
-        fetchNow(symbol);
+        fetchNow(symbol, { force: false }); // cache ok for background polling
       }
     }, intervalMs);
   }, [fetchNow]);
