@@ -224,7 +224,7 @@ app.get('/api/option-chain', async (req, res) => {
 });
 
 // All other GET requests not handled by API will return the React app
-app.get('/(.*)', (req, res) => {
+app.get('/*path', (req, res) => {
   res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
