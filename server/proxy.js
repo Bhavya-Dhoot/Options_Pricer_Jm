@@ -185,7 +185,12 @@ app.get('/api/option-chain', async (req, res) => {
       console.log(`[/api/option-chain] Force refresh requested for ${symbol}`);
     }
 
-    const apiPath = symbol === 'NIFTY' || symbol === 'BANKNIFTY' || symbol === 'FINNIFTY' || symbol === 'MIDCPNIFTY'
+    // NSE indices — everything else is an equity
+    const INDICES = new Set([
+      'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYIT',
+      'NIFTY50', 'NIFTYNXT50', 'NIFTYBANK',
+    ]);
+    const apiPath = INDICES.has(symbol)
       ? `/api/option-chain-indices?symbol=${symbol}`
       : `/api/option-chain-equities?symbol=${symbol}`;
 

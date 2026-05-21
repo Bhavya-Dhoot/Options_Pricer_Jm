@@ -1,6 +1,6 @@
 # NIFTY Options Pricer
 
-A production-grade **Black-Scholes-Merton** options pricing engine built for **NIFTY index options**, featuring real-time NSE data integration, interactive Greeks visualization, theta decay simulation, and scenario analysis.
+A production-grade **Black-Scholes-Merton** options pricing engine built for **NIFTY index options**, featuring real-time NSE data integration, interactive Greeks visualization, theta decay simulation, scenario analysis, and a comprehensive multi-leg strategies builder.
 
 Built with React 19, Vite 8, Recharts, and a Node.js proxy with Puppeteer for live NSE data.
 
@@ -29,6 +29,14 @@ Built with React 19, Vite 8, Recharts, and a Node.js proxy with Puppeteer for li
 - **Market premium input** — enter the premium you actually paid and see real P&L projections
 - **Forward trading days slider** — scrub through 1–60 days to visualize time decay progression
 
+### 🧩 Options Strategies Builder
+
+- **29 Pre-built Strategies** — instantly load standard setups spanning Single-Leg, Vertical Spreads, Neutral/Volatility, Calendar/Diagonal, Ratio Spreads, and Synthetic combinations.
+- **Custom Strategy Sandbox** — build arbitrary structures by adding/removing legs (Call, Put, or Spot), editing strikes, and adjusting quantities. Save them locally to use later.
+- **Advanced Math Modeling** — uses exact BSM pricing across legs to model current P&L, 50% DTE P&L, and expiry payoff curves.
+- **Probability Analysis** — calculates the Probability of Profit (PoP) and Expected Value (EV) by integrating a lognormal distribution of the underlying asset.
+- **Multi-Strategy Comparison** — select up to 3 different strategies and overlay their payoff graphs on a single chart with side-by-side risk/reward metrics.
+
 ### 🔧 Technical Highlights
 
 - **Abramowitz & Stegun CDF** — uses the Horner method approximation (max error < 7.5×10⁻⁸) for the cumulative normal distribution
@@ -44,12 +52,15 @@ Built with React 19, Vite 8, Recharts, and a Node.js proxy with Puppeteer for li
 ```
 Options Pricer/
 ├── src/                          # Frontend (React)
-│   ├── App.jsx                   # Tab navigation (Pricer / Theta Decay)
+│   ├── App.jsx                   # Tab navigation (Pricer / Theta Decay / Strategies)
 │   ├── OptionsPricer.jsx         # Main pricing interface + live data
 │   ├── ThetaDecaySimulator.jsx   # Theta decay analysis engine
+│   ├── OptionsStrategies.jsx     # Complex multi-leg strategies tab
+│   ├── components/strategies/    # Modular UI components for strategies tab
 │   ├── ScenarioSimulator.jsx     # Spot/IV sensitivity charts
 │   ├── GreeksDashboard.jsx       # Greeks display cards
 │   ├── bsm.js                    # Black-Scholes-Merton math engine
+│   ├── strategyDefinitions.js    # 29 predefined options strategy structures
 │   ├── useLiveData.js            # React hook for NSE data fetching
 │   ├── index.css                 # Global styles + design system
 │   └── main.jsx                  # React entry point
@@ -251,7 +262,9 @@ The Newton-Raphson iterative solver extracts IV from market prices:
 
 ## Known Limitations
 
-### ⚠️ Live Data Does Not Work on Cloud Hosting (Render/AWS/GCP/Azure)
+### ⚠️ Live Data Limitations
+
+#### 1. Cloud Hosting (Render/AWS/GCP/Azure) is Blocked
 
 **NSE India's Akamai Bot Manager actively blocks cloud provider IP ranges.** This means:
 
@@ -289,6 +302,21 @@ When deployed to Render (or any cloud provider):
 #### Current Behavior on Cloud
 
 The deployed version at `https://options-pricer-d61g.onrender.com` works as a **fully functional manual-input pricer**. All BSM calculations, Greeks, theta decay simulation, and scenario analysis work perfectly — only the "Fetch Live Prices" button will fail on cloud hosting.
+
+#### 2. Dynamic Ticker Symbol Support is Restricted Locally
+
+Even when running locally on a residential IP, NSE's Web Application Firewall (WAF) enforces strict session and origin checks that limit automated dynamic fetching.
+
+- ✅ **Default Index (NIFTY)**: Works flawlessly. Puppeteer navigates to the default option chain page and naturally intercepts the XHR request triggered natively by NSE's React application.
+- ❌ **Equities & Other Indices (RELIANCE, BANKNIFTY, etc.)**: Blocked or highly unreliable.
+
+**Why dynamic tickers fail:**
+1. **API Endpoint Migration**: NSE recently migrated to a unified `v3` API (`/api/option-chain-v3`) that requires specific, dynamic tokens generated purely by frontend interactions.
+2. **Fetch Hooking**: Akamai hooks `window.fetch` and `XMLHttpRequest` in the browser. Using `page.evaluate()` to programmatically call the API endpoints using valid cookies results in connection resets or empty responses (`{}`).
+3. **URL Rewriting Blocked**: Intercepting the natural NIFTY request and rewriting the URL to fetch a different symbol fails because the WAF strictly validates the exact `Referer`, query parameters, and `expiry` date combinations.
+4. **Iframe Sandboxing**: Injecting an invisible `<iframe>` to trigger native browser navigation to the API endpoints results in Cross-Origin DOM blocks.
+
+**Conclusion**: The frontend and proxy server are fully architected to support dynamic tickers, but due to these aggressive WAF protections, the app practically only guarantees live data for the default **NIFTY** index.
 
 ---
 

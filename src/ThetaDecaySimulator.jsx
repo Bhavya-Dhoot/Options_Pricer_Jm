@@ -1250,7 +1250,7 @@ export default function ThetaDecaySimulator() {
             <MetricCard
               icon={TrendingDown}
               iconColor="#f85149"
-              label="Theta per Day"
+              label="Theta (Θ/day)"
               value={`-₹${metrics.thetaPerDay.toFixed(2)}`}
               subtext={`${metrics.thetaPctOfPremium.toFixed(1)}% of premium/day`}
             />
@@ -1280,7 +1280,7 @@ export default function ThetaDecaySimulator() {
             <MetricCard
               icon={TrendingDown}
               iconColor="#f0883e"
-              label="Break-Even Move"
+              label="Break-Even (Δ)"
               value={`₹${metrics.breakEvenMove.toFixed(1)}/day`}
               subtext="Spot must move this much to offset theta"
             />

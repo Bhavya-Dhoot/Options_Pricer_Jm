@@ -32,6 +32,7 @@ export default function OptionsPricer() {
   const [openInterest, setOpenInterest] = useState('');
   const [selectedExpiry, setSelectedExpiry] = useState(null); // NSE format expiry
   const [chainStrikes, setChainStrikes] = useState([]); // strikes from chain for current expiry
+  const [symbol, setSymbol] = useState('NIFTY'); // active ticker symbol
 
   // ── Results state ──
   const [results, setResults] = useState(null);
@@ -43,7 +44,9 @@ export default function OptionsPricer() {
   const live = useLiveData();
 
   const handleFetchLive = useCallback(async () => {
-    const chain = await live.fetchNow('NIFTY');
+    const sym = symbol.trim().toUpperCase();
+    if (!sym) return;
+    const chain = await live.fetchNow(sym);
     if (!chain) return;
 
     // Set spot price
@@ -72,7 +75,7 @@ export default function OptionsPricer() {
         if (oi) setOpenInterest(oi.toLocaleString());
       }
     }
-  }, [live, optionType]);
+  }, [live, optionType, symbol]);
 
   // When user picks a different strike from the chain dropdown, update IV
   const handleChainStrikeChange = useCallback((newStrike) => {
@@ -221,11 +224,24 @@ export default function OptionsPricer() {
 
       {/* ── Live Data Bar ── */}
       <div className="card p-3 mb-5 flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {/* Symbol Input */}
+          <div className="relative">
+            <input
+              id="input-symbol"
+              type="text"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleFetchLive(); }}
+              placeholder="NIFTY"
+              className="w-[120px] text-xs px-3 py-2 rounded-lg bg-[#0d1117] border border-[#30363d] text-[#e6edf3] font-mono font-semibold tracking-wide focus:border-[#58a6ff] focus:outline-none transition-colors uppercase placeholder-[#484f58]"
+            />
+          </div>
+
           <button
             id="btn-fetch-live"
             onClick={handleFetchLive}
-            disabled={live.isLoading}
+            disabled={live.isLoading || !symbol.trim()}
             className={`flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg font-semibold transition-all cursor-pointer ${
               live.isLoading
                 ? 'bg-[#30363d] text-[#8b949e] cursor-wait'
@@ -238,7 +254,7 @@ export default function OptionsPricer() {
 
           <button
             id="btn-auto-refresh"
-            onClick={() => live.isLive ? live.stopAutoRefresh() : live.startAutoRefresh(30000, 'NIFTY')}
+            onClick={() => live.isLive ? live.stopAutoRefresh() : live.startAutoRefresh(30000, symbol.trim().toUpperCase() || 'NIFTY')}
             className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg font-medium transition-all cursor-pointer border ${
               live.isLive
                 ? 'border-[#3fb95040] bg-[#3fb95010] text-[#3fb950]'
@@ -254,7 +270,7 @@ export default function OptionsPricer() {
           {live.data && (
             <span className="flex items-center gap-1.5 text-[#3fb950]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950] animate-pulse" />
-              NIFTY: ₹{live.data.spot?.toFixed(2)}
+              {symbol.trim().toUpperCase() || 'NIFTY'}: ₹{live.data.spot?.toFixed(2)}
             </span>
           )}
           {live.lastUpdate && (

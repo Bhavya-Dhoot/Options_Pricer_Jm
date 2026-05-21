@@ -1,15 +1,14 @@
 /**
- * NSE Session Manager — Intercept with resource blocking
+ * NSE Session Manager — Multi-symbol support
  *
- * The ONLY approach that reliably returns data from NSE:
- *   Navigate to /option-chain → intercept the XHR API response
+ * Strategy:
+ *   - NIFTY: Navigate to /option-chain → intercept XHR (fastest)
+ *   - Other symbols: Navigate to /option-chain → wait for session →
+ *     use page.evaluate(fetch()) to call API for the desired symbol
  *
- * Memory optimized for Render Free (512MB):
- *   - Block images, fonts, stylesheets, media
- *   - Small viewport
- *   - Tab closed after each fetch
- *   - Chrome JS heap capped
- *   - --no-zygote for Docker
+ * The page context after loading /option-chain has all the Akamai
+ * cookies (nsit, nseappid, bm_sv) needed for API calls. A direct
+ * fetch() from within that context inherits those cookies.
  */
 
 let browser = null;
@@ -33,9 +32,7 @@ const CHROME_ARGS = [
   '--js-flags=--max-old-space-size=128',
   '--disable-software-rasterizer',
   '--disable-webgl',
-  '--disable-canvas-aa',
   '--disable-accelerated-2d-canvas',
-  '--disable-accelerated-video-decode',
 ];
 
 async function ensureBrowser() {
@@ -72,11 +69,11 @@ async function createPage(br) {
   await page.setViewport({ width: 800, height: 600 });
   await page.setCacheEnabled(false);
 
-  // Block heavy resources to save memory and bandwidth
+  // Block heavy resources
   await page.setRequestInterception(true);
   page.on('request', req => {
     const type = req.resourceType();
-    if (['image', 'font', 'stylesheet', 'media', 'texttrack', 'eventsource', 'websocket', 'manifest', 'other'].includes(type)) {
+    if (['image', 'font', 'stylesheet', 'media', 'texttrack', 'manifest'].includes(type)) {
       req.abort();
     } else {
       req.continue();
@@ -97,8 +94,16 @@ export async function refreshSession() {
 }
 
 /**
- * Fetch option chain data.
- * Navigate to /option-chain → intercept XHR → close tab.
+ * Fetch option chain for ANY symbol.
+ *
+ * For NIFTY (default on /option-chain):
+ *   → Navigate, intercept XHR naturally
+ *
+ * For other symbols:
+ *   → Navigate to /option-chain (establishes session)
+ *   → Wait for page to load
+ *   → Use page.evaluate(fetch()) to call the specific API endpoint
+ *   → The page context has all Akamai cookies needed
  */
 export async function nseApiFetch(path) {
   if (fetchInProgress) {
@@ -108,57 +113,24 @@ export async function nseApiFetch(path) {
 
   const symbolMatch = path.match(/symbol=(\w+)/);
   const symbol = symbolMatch ? symbolMatch[1] : 'NIFTY';
+  const isDefaultSymbol = symbol === 'NIFTY';
   let page = null;
 
   try {
     const br = await ensureBrowser();
     page = await createPage(br);
 
-    console.log(`[NSE API] Fetching ${symbol}...`);
+    console.log(`[NSE API] Fetching ${symbol}${isDefaultSymbol ? ' (intercept)' : ' (evaluate)'}...`);
 
-    const data = await new Promise((resolve, reject) => {
-      let resolved = false;
-
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          page.off('response', handler);
-          reject(new Error('Timed out waiting for option chain data (30s)'));
-        }
-      }, 30000);
-
-      const handler = async (response) => {
-        if (resolved) return;
-        try {
-          const url = response.url();
-          if (url.includes('/api/option-chain') && url.includes(symbol)) {
-            const json = await response.json();
-            if (json?.records) {
-              resolved = true;
-              clearTimeout(timeout);
-              page.off('response', handler);
-              resolve(json);
-            }
-          }
-        } catch { /* not JSON or detached — ignore */ }
-      };
-
-      page.on('response', handler);
-
-      page.goto(`${BASE_URL}/option-chain`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 25000,
-      }).catch(navErr => {
-        console.warn(`[NSE API] Nav: ${navErr.message.substring(0, 80)}`);
-        // Navigation errors are OK — interceptor may still fire
-      });
-    });
-
-    console.log(
-      `[NSE API] ✅ ${symbol}: spot=${data.records.underlyingValue}, ` +
-      `${data.records.data?.length} strikes, ts=${data.records.timestamp}`
-    );
-    return data;
+    if (isDefaultSymbol) {
+      // ── NIFTY: intercept the natural XHR ──
+      const data = await interceptOptionChain(page, symbol);
+      return data;
+    } else {
+      // ── Other symbols: establish session, then fetch via evaluate ──
+      const data = await evaluateFetch(page, path, symbol);
+      return data;
+    }
 
   } catch (err) {
     console.error(`[NSE API] ❌ ${symbol}: ${err.message}`);
@@ -174,6 +146,132 @@ export async function nseApiFetch(path) {
     }
     fetchInProgress = false;
   }
+}
+
+/**
+ * Strategy 1: Navigate to /option-chain and intercept the NIFTY XHR.
+ */
+async function interceptOptionChain(page, symbol) {
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        page.off('response', handler);
+        reject(new Error(`Timed out waiting for ${symbol} data (30s)`));
+      }
+    }, 30000);
+
+    const handler = async (response) => {
+      if (resolved) return;
+      try {
+        const url = response.url();
+        if (url.includes('/api/option-chain') && url.includes(symbol)) {
+          const json = await response.json();
+          if (json?.records) {
+            resolved = true;
+            clearTimeout(timeout);
+            page.off('response', handler);
+            console.log(
+              `[NSE API] ✅ ${symbol}: spot=${json.records.underlyingValue}, ` +
+              `${json.records.data?.length} strikes, ts=${json.records.timestamp}`
+            );
+            resolve(json);
+          }
+        }
+      } catch { /* ignore */ }
+    };
+
+    page.on('response', handler);
+
+    page.goto(`${BASE_URL}/option-chain`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 25000,
+    }).catch(navErr => {
+      console.warn(`[NSE API] Nav: ${navErr.message.substring(0, 80)}`);
+    });
+  });
+}
+
+/**
+ * Strategy 2: Establish session via /option-chain, then use page.evaluate(fetch)
+ * to call the API for a non-NIFTY symbol.
+ */
+async function evaluateFetch(page, apiPath, symbol) {
+  // Step 1: Navigate to /option-chain to establish session
+  console.log(`[NSE API] Establishing session for ${symbol}...`);
+
+  // Wait for the NIFTY XHR to fire (proves session is established)
+  const sessionReady = new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => { if (!done) { done = true; resolve(false); } }, 20000);
+
+    const handler = async (response) => {
+      if (done) return;
+      try {
+        const url = response.url();
+        if (url.includes('/api/option-chain')) {
+          const json = await response.json();
+          if (json?.records) {
+            done = true;
+            clearTimeout(timer);
+            page.off('response', handler);
+            resolve(true);
+          }
+        }
+      } catch { /* ignore */ }
+    };
+
+    page.on('response', handler);
+  });
+
+  await page.goto(`${BASE_URL}/option-chain`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 20000,
+  }).catch(err => {
+    console.warn(`[NSE API] Session nav: ${err.message.substring(0, 80)}`);
+  });
+
+  const ready = await sessionReady;
+  if (!ready) {
+    console.warn(`[NSE API] Session not confirmed — trying fetch anyway...`);
+  } else {
+    console.log(`[NSE API] Session established, fetching ${symbol}...`);
+  }
+
+  // Step 2: Use page.evaluate to fetch the desired symbol's API
+  const apiUrl = `${BASE_URL}${apiPath}`;
+  const result = await page.evaluate(async (url) => {
+    try {
+      const res = await fetch(url, {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        cache: 'no-store',
+      });
+      if (!res.ok) return { _error: `HTTP ${res.status}` };
+      return await res.json();
+    } catch (e) {
+      return { _error: e.message };
+    }
+  }, apiUrl);
+
+  if (result?._error) {
+    throw new Error(`NSE API error for ${symbol}: ${result._error}`);
+  }
+
+  if (!result?.records) {
+    throw new Error(`No records for ${symbol}: ${JSON.stringify(result).substring(0, 100)}`);
+  }
+
+  console.log(
+    `[NSE API] ✅ ${symbol}: spot=${result.records.underlyingValue}, ` +
+    `${result.records.data?.length} strikes, ts=${result.records.timestamp}`
+  );
+  return result;
 }
 
 export async function closeBrowser() {

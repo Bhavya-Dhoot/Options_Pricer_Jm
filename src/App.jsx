@@ -1,15 +1,25 @@
-import React, { useState } from 'react';
-import { Calculator, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calculator, Clock, BarChart2 } from 'lucide-react';
 import OptionsPricer from './OptionsPricer.jsx';
 import ThetaDecaySimulator from './ThetaDecaySimulator.jsx';
+import OptionsStrategies from './OptionsStrategies.jsx';
+import { useLiveData } from './useLiveData.js';
 
 const TABS = [
   { id: 'pricer', label: 'Options Pricer', icon: Calculator },
   { id: 'theta',  label: 'Theta Decay',   icon: Clock },
+  { id: 'strategies', label: 'Options Strategies', icon: BarChart2 },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('pricer');
+  const live = useLiveData();
+  const riskFreeRate = 6.5;
+
+  // Auto-fetch in background to hydrate liveData if available
+  useEffect(() => {
+    live.fetchNow('NIFTY', { force: false }).catch(() => {});
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#0d1117]">
@@ -41,6 +51,13 @@ export default function App() {
       </div>
       <div style={{ display: activeTab === 'theta' ? 'block' : 'none' }}>
         <ThetaDecaySimulator />
+      </div>
+      <div style={{ display: activeTab === 'strategies' ? 'block' : 'none' }}>
+        <OptionsStrategies 
+          liveSpot={live.data?.spot ?? 24500}
+          liveIV={live.data?.iv ?? 0.15}
+          riskFreeRate={riskFreeRate}
+        />
       </div>
     </div>
   );
