@@ -52,8 +52,14 @@ COPY server/ ./server/
 # Copy built frontend from builder stage
 COPY --from=builder /app/dist ./dist
 
+# Ensure /tmp has enough space for Chrome (--disable-dev-shm-usage writes here)
+RUN mkdir -p /tmp && chmod 1777 /tmp
+
 # Expose the port (Render injects PORT env var)
 EXPOSE 3001
+
+# Increase Node.js memory limit (Chrome multi-process needs headroom)
+ENV NODE_OPTIONS="--max-old-space-size=512"
 
 # Start the server
 CMD ["node", "server/proxy.js"]
