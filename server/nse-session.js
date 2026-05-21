@@ -1,16 +1,16 @@
 /**
- * NSE Session Manager — Production-grade approach
+ * NSE Session Manager — Puppeteer intercept (memory-optimized)
  *
- * Architecture:
- *   - Persistent browser (multi-process, no --single-process)
- *   - Fresh tab per fetch (avoids "detached frame" from page reuse)
- *   - --disable-dev-shm-usage handles limited /dev/shm in Docker
- *   - Auto-restarts browser on fatal errors
+ * The ONLY reliable approach for NSE:
+ *   - Navigate to /option-chain page in headless Chrome
+ *   - Intercept the XHR response the page makes to NSE's API
+ *   - Close the tab after each fetch (browser stays alive)
  *
- * Strategy per fetch:
- *   1. Ensure browser is running
- *   2. Create fresh tab → navigate to /option-chain → intercept XHR
- *   3. Close tab (browser stays alive for next fetch)
+ * Memory optimizations for Render Free (512MB):
+ *   - Minimal Chrome flags to reduce footprint
+ *   - Small viewport (800x600)
+ *   - Tab closed after each fetch
+ *   - --no-zygote instead of --single-process (avoids frame detach)
  */
 
 let browser = null;
@@ -21,22 +21,26 @@ const BASE_URL = 'https://www.nseindia.com';
 const CHROME_ARGS = [
   '--no-sandbox',
   '--disable-setuid-sandbox',
-  '--disable-dev-shm-usage',          // Write shared memory to /tmp instead of /dev/shm
+  '--disable-dev-shm-usage',
   '--disable-blink-features=AutomationControlled',
   '--disable-gpu',
+  '--no-zygote',
   '--disable-extensions',
   '--disable-background-networking',
   '--disable-default-apps',
   '--disable-sync',
   '--no-first-run',
   '--disable-translate',
-  '--no-zygote',                       // Docker: skip zygote process
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
+  '--js-flags=--max-old-space-size=128',
 ];
 
 async function ensureBrowser() {
   if (browser) {
     try {
-      await browser.version(); // check if alive
+      await browser.version();
       return browser;
     } catch {
       console.warn('[NSE Session] Browser died — restarting...');
@@ -64,8 +68,18 @@ async function createPage(br) {
   await page.setUserAgent(
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
   );
-  await page.setViewport({ width: 1280, height: 720 });
+  await page.setViewport({ width: 800, height: 600 });
   await page.setCacheEnabled(false);
+  // Block images, fonts, stylesheets to save memory/bandwidth
+  await page.setRequestInterception(true);
+  page.on('request', req => {
+    const type = req.resourceType();
+    if (['image', 'font', 'stylesheet', 'media'].includes(type)) {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
   return page;
 }
 
@@ -98,7 +112,7 @@ export async function nseApiFetch(path) {
     const br = await ensureBrowser();
     page = await createPage(br);
 
-    console.log(`[NSE API] Fetching ${symbol} via fresh tab...`);
+    console.log(`[NSE API] Fetching ${symbol}...`);
 
     const data = await new Promise((resolve, reject) => {
       let resolved = false;
@@ -133,8 +147,6 @@ export async function nseApiFetch(path) {
         waitUntil: 'domcontentloaded',
         timeout: 20000,
       }).catch((navErr) => {
-        // Navigation errors (frame detach, redirects) are common on NSE.
-        // The interceptor may still capture the response.
         console.warn(`[NSE API] Nav warning: ${navErr.message.substring(0, 100)}`);
       });
     });
@@ -147,9 +159,8 @@ export async function nseApiFetch(path) {
 
   } catch (err) {
     console.error(`[NSE API] ❌ ${symbol}: ${err.message}`);
-    // If browser itself died, null it so next call restarts
     if (err.message.includes('Target closed') || err.message.includes('Session closed') || err.message.includes('Protocol error')) {
-      console.warn('[NSE API] Browser appears dead — will restart on next call');
+      console.warn('[NSE API] Browser died — will restart on next call');
       try { await browser?.close(); } catch { /* ignore */ }
       browser = null;
     }
