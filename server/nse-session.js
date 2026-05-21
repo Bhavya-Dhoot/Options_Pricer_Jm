@@ -1,16 +1,15 @@
 /**
- * NSE Session Manager — Puppeteer intercept (memory-optimized)
+ * NSE Session Manager — Intercept with resource blocking
  *
- * The ONLY reliable approach for NSE:
- *   - Navigate to /option-chain page in headless Chrome
- *   - Intercept the XHR response the page makes to NSE's API
- *   - Close the tab after each fetch (browser stays alive)
+ * The ONLY approach that reliably returns data from NSE:
+ *   Navigate to /option-chain → intercept the XHR API response
  *
- * Memory optimizations for Render Free (512MB):
- *   - Minimal Chrome flags to reduce footprint
- *   - Small viewport (800x600)
+ * Memory optimized for Render Free (512MB):
+ *   - Block images, fonts, stylesheets, media
+ *   - Small viewport
  *   - Tab closed after each fetch
- *   - --no-zygote instead of --single-process (avoids frame detach)
+ *   - Chrome JS heap capped
+ *   - --no-zygote for Docker
  */
 
 let browser = null;
@@ -31,10 +30,12 @@ const CHROME_ARGS = [
   '--disable-sync',
   '--no-first-run',
   '--disable-translate',
-  '--disable-background-timer-throttling',
-  '--disable-renderer-backgrounding',
-  '--disable-backgrounding-occluded-windows',
   '--js-flags=--max-old-space-size=128',
+  '--disable-software-rasterizer',
+  '--disable-webgl',
+  '--disable-canvas-aa',
+  '--disable-accelerated-2d-canvas',
+  '--disable-accelerated-video-decode',
 ];
 
 async function ensureBrowser() {
@@ -70,16 +71,18 @@ async function createPage(br) {
   );
   await page.setViewport({ width: 800, height: 600 });
   await page.setCacheEnabled(false);
-  // Block images, fonts, stylesheets to save memory/bandwidth
+
+  // Block heavy resources to save memory and bandwidth
   await page.setRequestInterception(true);
   page.on('request', req => {
     const type = req.resourceType();
-    if (['image', 'font', 'stylesheet', 'media'].includes(type)) {
+    if (['image', 'font', 'stylesheet', 'media', 'texttrack', 'eventsource', 'websocket', 'manifest', 'other'].includes(type)) {
       req.abort();
     } else {
       req.continue();
     }
   });
+
   return page;
 }
 
@@ -95,8 +98,7 @@ export async function refreshSession() {
 
 /**
  * Fetch option chain data.
- * Opens a fresh tab, navigates to /option-chain, intercepts the XHR.
- * Closes the tab afterward (browser stays alive).
+ * Navigate to /option-chain → intercept XHR → close tab.
  */
 export async function nseApiFetch(path) {
   if (fetchInProgress) {
@@ -121,15 +123,15 @@ export async function nseApiFetch(path) {
         if (!resolved) {
           resolved = true;
           page.off('response', handler);
-          reject(new Error('Timed out waiting for option chain data (25s)'));
+          reject(new Error('Timed out waiting for option chain data (30s)'));
         }
-      }, 25000);
+      }, 30000);
 
       const handler = async (response) => {
         if (resolved) return;
-        const url = response.url();
-        if (url.includes('/api/option-chain') && url.includes(symbol)) {
-          try {
+        try {
+          const url = response.url();
+          if (url.includes('/api/option-chain') && url.includes(symbol)) {
             const json = await response.json();
             if (json?.records) {
               resolved = true;
@@ -137,17 +139,18 @@ export async function nseApiFetch(path) {
               page.off('response', handler);
               resolve(json);
             }
-          } catch { /* not JSON */ }
-        }
+          }
+        } catch { /* not JSON or detached — ignore */ }
       };
 
       page.on('response', handler);
 
       page.goto(`${BASE_URL}/option-chain`, {
         waitUntil: 'domcontentloaded',
-        timeout: 20000,
-      }).catch((navErr) => {
-        console.warn(`[NSE API] Nav warning: ${navErr.message.substring(0, 100)}`);
+        timeout: 25000,
+      }).catch(navErr => {
+        console.warn(`[NSE API] Nav: ${navErr.message.substring(0, 80)}`);
+        // Navigation errors are OK — interceptor may still fire
       });
     });
 
