@@ -125,13 +125,15 @@ app.get('/api/option-chain', async (req, res) => {
     const tokensToFetch = [];
     const tokenMap = new Map(); // token -> { strike, type }
 
-    // Use futureExpiry if provided, else fallback to targetExpiry
-    const futExpTarget = futureExpiry || finalTargetExpiry;
-    const futureTokenObj = getFutureToken(symbol, futExpTarget);
-    if (futureTokenObj) {
-      tokensToFetch.push(futureTokenObj);
-      tokenMap.set(futureTokenObj, { type: 'FUT' });
-    }
+    // Fetch all active Future expiries so UI can switch seamlessly
+    const futExpiries = getAvailableFutureExpiries(symbol);
+    futExpiries.forEach(exp => {
+      const futToken = getFutureToken(symbol, exp);
+      if (futToken) {
+        tokensToFetch.push(futToken);
+        tokenMap.set(futToken, { type: 'FUT', expiry: exp });
+      }
+    });
 
     relevantStrikes.forEach(k => {
       if (strikesMap[k].CE) {
@@ -161,18 +163,6 @@ app.get('/api/option-chain', async (req, res) => {
       }
     }
 
-    // Map fetched options by token for fast lookup
-    const optQuoteMap = {};
-    let futurePrice = null;
-    fetchedOptions.forEach(opt => {
-      const meta = tokenMap.get(opt.symbolToken);
-      if (meta?.type === 'FUT') {
-        futurePrice = opt.ltp;
-      } else {
-        optQuoteMap[opt.symbolToken] = opt;
-      }
-    });
-
     // 5. Construct NSE-like Response
     const formatExpiry = (angelExp) => {
       if (!angelExp || angelExp.length < 9) return angelExp;
@@ -182,6 +172,27 @@ app.get('/api/option-chain', async (req, res) => {
       const formattedMonth = month.charAt(0) + month.slice(1).toLowerCase();
       return `${day}-${formattedMonth}-${year}`;
     };
+
+    const futExpTarget = futureExpiry || finalTargetExpiry;
+    const futExpTargetFormat = formatExpiry(futExpTarget);
+    
+    // Map fetched options by token for fast lookup
+    const optQuoteMap = {};
+    let futurePrice = null; // fallback single future price
+    const futurePrices = {}; // mapped future prices by formatted expiry
+    
+    fetchedOptions.forEach(opt => {
+      const meta = tokenMap.get(opt.symbolToken);
+      if (meta?.type === 'FUT') {
+        const formattedExp = formatExpiry(meta.expiry);
+        futurePrices[formattedExp] = opt.ltp;
+        if (formattedExp === futExpTargetFormat || !futurePrice) {
+          futurePrice = opt.ltp;
+        }
+      } else {
+        optQuoteMap[opt.symbolToken] = opt;
+      }
+    });
 
     const nseTargetExpiry = formatExpiry(finalTargetExpiry);
     const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
@@ -239,6 +250,7 @@ app.get('/api/option-chain', async (req, res) => {
     const finalResponse = {
       spot: spotPrice,
       futurePrice: futurePrice,
+      futurePrices: futurePrices,
       timestamp: new Date().toISOString(),
       expiryDates: expiries.map(formatExpiry),
       byExpiry: {

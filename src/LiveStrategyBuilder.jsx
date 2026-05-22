@@ -84,7 +84,8 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       let newT = leg.type === 'future' ? (globalInputs.farDte / 365) : (globalInputs.dte / 365);
       
       if (leg.type === 'future') {
-        newPremium = live.data.futurePrice || live.data.spot || 0;
+        const futExp = leg.expiry || targetFutExpiry || futExpiries?.[0];
+        newPremium = live.data.futurePrices?.[futExp] || live.data.futurePrice || live.data.spot || 0;
       } else if (live.data.byExpiry && leg.expiry) {
         const records = live.data.byExpiry[leg.expiry];
         if (records) {
@@ -155,7 +156,8 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
     
     let initialPremium = 0;
     if (type === 'future') {
-      initialPremium = live.data?.futurePrice || live.data?.spot || 0;
+      const futExp = targetFutExpiry || futExpiries?.[0];
+      initialPremium = live.data?.futurePrices?.[futExp] || live.data?.futurePrice || live.data?.spot || 0;
     } else if (live.data?.byExpiry && exp) {
       const records = live.data.byExpiry[exp];
       if (records) {
@@ -198,7 +200,8 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       // Auto-bind premium if strike, type, action, or expiry changes
       if (updates.strike !== undefined || updates.type !== undefined || updates.action !== undefined || updates.expiry !== undefined) {
         if (updated.type === 'future') {
-          updated.premium = live.data?.futurePrice || live.data?.spot || 0;
+          const futExp = updated.expiry || targetFutExpiry || futExpiries?.[0];
+          updated.premium = live.data?.futurePrices?.[futExp] || live.data?.futurePrice || live.data?.spot || 0;
           updated.strike = 0; // Futures don't have a strike
         } else if (live.data?.byExpiry && exp) {
           const records = live.data.byExpiry[exp];
