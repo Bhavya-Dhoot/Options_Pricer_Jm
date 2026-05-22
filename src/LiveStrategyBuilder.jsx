@@ -131,7 +131,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
     const targetExp = targetExpiry || live.data.expiryDates?.[0];
     const records = live.data.byExpiry[targetExp];
     if (!records) return [];
-    return records.map(s => s.strike);
+    return records.map(s => s.strikePrice || s.strike);
   }, [live.data, targetExpiry]);
 
   const getLotSize = (sym) => {
@@ -156,7 +156,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
     } else if (live.data?.byExpiry && exp) {
       const records = live.data.byExpiry[exp];
       if (records) {
-        const strikeData = records.find(s => s.strike === defaultStrike);
+        const strikeData = records.find(s => (s.strikePrice || s.strike) === defaultStrike);
         if (strikeData) {
           const optData = type === 'call' ? strikeData.call : strikeData.put;
           if (optData) {
@@ -207,7 +207,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
                 : 24500;
               updated.strike = defaultStrike;
             }
-            const strikeData = records.find(s => s.strike === updated.strike);
+            const strikeData = records.find(s => (s.strikePrice || s.strike) === updated.strike);
             if (strikeData) {
               const optData = updated.type === 'call' ? strikeData.call : strikeData.put;
               if (optData) {

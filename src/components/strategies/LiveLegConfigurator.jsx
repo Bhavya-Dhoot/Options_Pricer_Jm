@@ -81,6 +81,7 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], byExpiry =
                       <option value={leg.strike} disabled hidden>{leg.strike}</option>
                       {leg.expiry && byExpiry[leg.expiry] ? (
                         byExpiry[leg.expiry].map(s => {
+                          const sPrice = s.strikePrice || s.strike;
                           const opt = leg.type === 'call' ? s.call : s.put;
                           let priceText = '';
                           if (opt) {
@@ -88,8 +89,8 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], byExpiry =
                             priceText = ` (₹${(p || 0).toFixed(1)})`;
                           }
                           return (
-                            <option key={s.strike} value={s.strike}>
-                              {s.strike}{priceText}
+                            <option key={sPrice} value={sPrice}>
+                              {sPrice}{priceText}
                             </option>
                           );
                         })
