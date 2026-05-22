@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
-import { initScripMaster, getUnderlyingToken, getAvailableExpiries, getOptionTokens } from './scripMaster.js';
+import { initScripMaster, getUnderlyingToken, getAvailableExpiries, getOptionTokens, getFutureToken } from './scripMaster.js';
 import { solveImpliedIV } from '../src/bsm.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -123,13 +123,26 @@ app.get('/api/option-chain', async (req, res) => {
     const relevantStrikes = allStrikes.slice(startIndex, endIndex + 1);
 
     const tokensToFetch = [];
+    const tokenMap = new Map(); // token -> { strike, type }
+
+    const futureToken = getFutureToken(symbol, targetExpiry);
+    if (futureToken) {
+      tokensToFetch.push(futureToken);
+      tokenMap.set(futureToken, { type: 'FUT' });
+    }
+
     relevantStrikes.forEach(k => {
-      if (strikesMap[k].CE) tokensToFetch.push(strikesMap[k].CE.token);
-      if (strikesMap[k].PE) tokensToFetch.push(strikesMap[k].PE.token);
+      if (strikesMap[k].CE) {
+        tokensToFetch.push(strikesMap[k].CE.token);
+        tokenMap.set(strikesMap[k].CE.token, { strike: k, type: 'CE' });
+      }
+      if (strikesMap[k].PE) {
+        tokensToFetch.push(strikesMap[k].PE.token);
+        tokenMap.set(strikesMap[k].PE.token, { strike: k, type: 'PE' });
+      }
     });
 
     // 4. Fetch Options Data (Batch up to 50 tokens at a time)
-    // We have at most 31 strikes * 2 = 62 tokens, so 2 batches
     const fetchedOptions = [];
     const optExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BFO' : 'NFO';
     
@@ -148,18 +161,22 @@ app.get('/api/option-chain', async (req, res) => {
 
     // Map fetched options by token for fast lookup
     const optQuoteMap = {};
+    let futurePrice = null;
     fetchedOptions.forEach(opt => {
-      optQuoteMap[opt.symbolToken] = opt;
+      const meta = tokenMap.get(opt.symbolToken);
+      if (meta?.type === 'FUT') {
+        futurePrice = opt.ltp;
+      } else {
+        optQuoteMap[opt.symbolToken] = opt;
+      }
     });
 
     // 5. Construct NSE-like Response
-    // Convert Angel One Expiry (DDMMMYYYY e.g. 25MAY2026) to NSE format (DD-MMM-YYYY e.g. 25-May-2026)
     const formatExpiry = (angelExp) => {
       if (!angelExp || angelExp.length < 9) return angelExp;
       const day = angelExp.slice(0, 2);
       const month = angelExp.slice(2, 5);
       const year = angelExp.slice(5);
-      // Capitalize first letter of month, rest lowercase
       const formattedMonth = month.charAt(0) + month.slice(1).toLowerCase();
       return `${day}-${formattedMonth}-${year}`;
     };
@@ -169,8 +186,6 @@ app.get('/api/option-chain', async (req, res) => {
     const parts = nseTargetExpiry.split('-');
     const expiryDateObj = new Date(parseInt(parts[2]), months[parts[1]], parseInt(parts[0]));
     
-    // T for IV calculation (calendar days / 365)
-    // If expiry is today, T might be 0, so bound to a minimum of 0.5 days to avoid Infinity IV
     const T = Math.max(0.5, (expiryDateObj.getTime() - Date.now()) / 86400000) / 365;
 
     const strikeRecords = relevantStrikes.map(strike => {
@@ -221,6 +236,7 @@ app.get('/api/option-chain', async (req, res) => {
 
     const finalResponse = {
       spot: spotPrice,
+      futurePrice: futurePrice,
       timestamp: new Date().toISOString(),
       expiryDates: expiries.map(formatExpiry),
       byExpiry: {

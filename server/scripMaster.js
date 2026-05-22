@@ -14,10 +14,12 @@ export async function initScripMaster() {
     scripMaster = response.data;
     
     // Filter to just NSE/BSE and NFO/BFO for fast lookups
-    nfoMaster = scripMaster.filter(s => (s.exch_seg === 'NFO' || s.exch_seg === 'BFO') && (s.instrumenttype === 'OPTIDX' || s.instrumenttype === 'OPTSTK'));
+    nfoMaster = scripMaster.filter(s => (s.exch_seg === 'NFO' || s.exch_seg === 'BFO') && 
+      (s.instrumenttype === 'OPTIDX' || s.instrumenttype === 'OPTSTK' || 
+       s.instrumenttype === 'FUTIDX' || s.instrumenttype === 'FUTSTK'));
     nseMaster = scripMaster.filter(s => s.exch_seg === 'NSE' || s.exch_seg === 'BSE');
     
-    console.log(`[ScripMaster] Loaded ${nseMaster.length} Spot equities/indices and ${nfoMaster.length} Options.`);
+    console.log(`[ScripMaster] Loaded ${nseMaster.length} Spot equities/indices and ${nfoMaster.length} Options/Futures.`);
   } catch (err) {
     console.error('[ScripMaster] Failed to download Scrip Master:', err.message);
     throw err;
@@ -46,7 +48,7 @@ export function getUnderlyingToken(symbol) {
 
 export function getOptionTokens(symbol, expiryDate = null) {
   // expiryDate format expected in NFO is usually DDMMMYYYY (e.g., 25MAY2026)
-  let filtered = nfoMaster.filter(s => s.name === symbol);
+  let filtered = nfoMaster.filter(s => s.name === symbol && s.instrumenttype.startsWith('OPT'));
   
   if (expiryDate) {
     filtered = filtered.filter(s => s.expiry === expiryDate);
@@ -55,8 +57,17 @@ export function getOptionTokens(symbol, expiryDate = null) {
   return filtered;
 }
 
+export function getFutureToken(symbol, expiryDate) {
+  let filtered = nfoMaster.filter(s => s.name === symbol && s.instrumenttype.startsWith('FUT'));
+  if (expiryDate) {
+    filtered = filtered.filter(s => s.expiry === expiryDate);
+  }
+  // There is usually only one future per expiry, return the first one's token
+  return filtered.length > 0 ? filtered[0].token : null;
+}
+
 export function getAvailableExpiries(symbol) {
-  const options = nfoMaster.filter(s => s.name === symbol);
+  const options = nfoMaster.filter(s => s.name === symbol && s.instrumenttype.startsWith('OPT'));
   const expiries = new Set(options.map(s => s.expiry));
   
   // Sort expiries chronologically

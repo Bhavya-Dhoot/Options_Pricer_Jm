@@ -5,7 +5,7 @@
  *   { data, isLoading, error, isLive, lastUpdate, fetchNow, startAutoRefresh, stopAutoRefresh }
  *
  * data shape:
- *   { spot, expiryDates, byExpiry, timestamp }
+ *   { spot, futurePrice, expiryDates, byExpiry, timestamp }
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';

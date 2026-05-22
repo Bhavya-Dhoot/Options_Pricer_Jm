@@ -173,11 +173,11 @@ export function strategyPayoffAtExpiry(legs, spotAtExpiry) {
       intrinsic = Math.max(spotAtExpiry - leg.strike, 0);
     } else if (leg.type === 'put') {
       intrinsic = Math.max(leg.strike - spotAtExpiry, 0);
-    } else if (leg.type === 'underlying') {
+    } else if (leg.type === 'underlying' || leg.type === 'future') {
       intrinsic = spotAtExpiry;
     }
     const direction = leg.action === 'buy' ? 1 : -1;
-    return total + direction * (intrinsic - leg.premium) * leg.qty * NIFTY_LOT_SIZE;
+    return total + direction * (intrinsic - leg.premium) * leg.qty * (leg.lotSize || 25);
   }, 0);
 }
 
@@ -187,7 +187,7 @@ export function strategyPayoffAtExpiry(legs, spotAtExpiry) {
 export function strategyBSMPnL(legs, spot, T_remaining, iv, r, q) {
   return legs.reduce((total, leg) => {
     let currentPrice = 0;
-    if (leg.type === 'underlying') {
+    if (leg.type === 'underlying' || leg.type === 'future') {
       currentPrice = spot;
     } else {
       const legT = leg.T !== undefined ? leg.T : T_remaining;
@@ -195,7 +195,7 @@ export function strategyBSMPnL(legs, spot, T_remaining, iv, r, q) {
       currentPrice = premiumAt(spot, leg.strike, legT, r, legIV, leg.type.toUpperCase(), q);
     }
     const direction = leg.action === 'buy' ? 1 : -1;
-    return total + direction * (currentPrice - leg.premium) * leg.qty * NIFTY_LOT_SIZE;
+    return total + direction * (currentPrice - leg.premium) * leg.qty * (leg.lotSize || 25);
   }, 0);
 }
 

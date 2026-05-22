@@ -3,11 +3,13 @@ import { Calculator, Clock, BarChart2 } from 'lucide-react';
 import OptionsPricer from './OptionsPricer.jsx';
 import ThetaDecaySimulator from './ThetaDecaySimulator.jsx';
 import OptionsStrategies from './OptionsStrategies.jsx';
+import LiveStrategyBuilder from './LiveStrategyBuilder.jsx';
 import { useLiveData } from './useLiveData.js';
 
 const TABS = [
   { id: 'pricer', label: 'Options Pricer', icon: Calculator },
   { id: 'theta',  label: 'Theta Decay',   icon: Clock },
+  { id: 'live_strategy', label: 'Strategy Builder', icon: BarChart2 },
   { id: 'strategies', label: 'Options Strategies', icon: BarChart2 },
 ];
 
@@ -51,6 +53,9 @@ export default function App() {
       </div>
       <div style={{ display: activeTab === 'theta' ? 'block' : 'none' }}>
         <ThetaDecaySimulator />
+      </div>
+      <div style={{ display: activeTab === 'live_strategy' ? 'block' : 'none' }}>
+        <LiveStrategyBuilder live={live} />
       </div>
       <div style={{ display: activeTab === 'strategies' ? 'block' : 'none' }}>
         <OptionsStrategies 
