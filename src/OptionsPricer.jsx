@@ -4,7 +4,7 @@ import {
   Radio, Wifi, WifiOff, RefreshCw, Loader2,
 } from 'lucide-react';
 import { calculateBSM, countTradingDays, getDefaultExpiry } from './bsm.js';
-import { useLiveData, findATMStrike, nseToISODate } from './useLiveData.js';
+import { useLiveData, useAvailableExpiries, findATMStrike, nseToISODate } from './useLiveData.js';
 import GreeksDashboard from './GreeksDashboard.jsx';
 import ScenarioSimulator from './ScenarioSimulator.jsx';
 import LiveFetchBar from './components/LiveFetchBar.jsx';
@@ -40,6 +40,7 @@ export default function OptionsPricer() {
   const [copied, setCopied] = useState(false);
 
   const live = useLiveData();
+  const availableExpiries = useAvailableExpiries('NIFTY');
 
   const handleDataFetched = useCallback((chain, sym) => {
     if (!chain) return;
@@ -84,20 +85,27 @@ export default function OptionsPricer() {
     }
   }, [chainStrikes, optionType]);
 
-  // When expiry changes from chain dropdown, update strikes and IV
+  // When user picks a different expiry from dropdown
   const handleChainExpiryChange = useCallback((nseExpiry) => {
     setSelectedExpiry(nseExpiry);
     setExpiryDate(nseToISODate(nseExpiry));
-    const strikes = live.data?.byExpiry?.[nseExpiry] || [];
-    setChainStrikes(strikes);
-    const spot = live.data?.spot || spotPrice;
-    const atm = findATMStrike(live.data, nseExpiry, spot);
-    if (atm) {
-      setStrikePrice(atm.strikePrice);
-      const relevantIV = optionType === 'CALL' ? atm.call?.iv : atm.put?.iv;
-      if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
-    }
-  }, [live.data, spotPrice, optionType]);
+    
+    // Fetch options for the new expiry from the backend
+    live.fetchNow('NIFTY', { force: true, expiry: nseExpiry }).then(chain => {
+      if (chain) {
+        const strikes = chain.byExpiry?.[nseExpiry] || [];
+        setChainStrikes(strikes);
+        
+        // Find ATM strike for the new expiry to auto-select
+        const atm = findATMStrike(chain, nseExpiry, chain.spot);
+        if (atm) {
+          setStrikePrice(atm.strikePrice);
+          const relevantIV = optionType === 'CALL' ? atm.call?.iv : atm.put?.iv;
+          if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
+        }
+      }
+    });
+  }, [live, optionType]);
 
 
 
@@ -319,14 +327,14 @@ export default function OptionsPricer() {
           {/* Expiry — with chain dropdown if available */}
           <div className="flex-1 min-w-[150px]">
             <label className="block text-xs font-medium text-[#e6edf3] mb-1">Expiry Date</label>
-            {live.data?.expiryDates?.length > 0 ? (
+            {availableExpiries.length > 0 ? (
               <select
                 id="input-expiry"
-                value={selectedExpiry || ''}
+                value={selectedExpiry || availableExpiries[0]}
                 onChange={(e) => handleChainExpiryChange(e.target.value)}
                 className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] focus:border-[#58a6ff] focus:outline-none"
               >
-                {live.data.expiryDates.map(exp => (
+                {availableExpiries.map(exp => (
                   <option key={exp} value={exp}>{exp}</option>
                 ))}
               </select>

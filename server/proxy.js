@@ -68,15 +68,25 @@ app.get('/api/option-chain', async (req, res) => {
     
     const spotPrice = spotData.ltp;
 
-    // 2. Find Nearest Expiry
+    // 2. Find Requested or Nearest Expiry
     const expiries = getAvailableExpiries(symbol);
     if (expiries.length === 0) {
       return res.status(404).json({ error: `No expiries found for ${symbol}` });
     }
-    const nearestExpiry = expiries[0]; // Already sorted chronologically
+    
+    let targetExpiry = expiries[0]; // Default to nearest
+    
+    if (req.query.expiry) {
+      // The frontend sends in DD-MMM-YYYY format (e.g., "26-May-2026")
+      // We need to convert it to DDMMMYYYY format for scripMaster lookup (e.g., "26MAY2026")
+      const requestedNfoFormat = req.query.expiry.replace(/-/g, '').toUpperCase();
+      if (expiries.includes(requestedNfoFormat)) {
+        targetExpiry = requestedNfoFormat;
+      }
+    }
 
     // 3. Find Options Tokens around Spot
-    const optionsForExpiry = getOptionTokens(symbol, nearestExpiry);
+    const optionsForExpiry = getOptionTokens(symbol, targetExpiry);
     
     // Sort by strike distance to spot to get the nearest strikes
     const optionsWithStrike = optionsForExpiry.map(opt => ({
@@ -151,9 +161,9 @@ app.get('/api/option-chain', async (req, res) => {
       return `${day}-${formattedMonth}-${year}`;
     };
 
-    const nseNearestExpiry = formatExpiry(nearestExpiry);
+    const nseTargetExpiry = formatExpiry(targetExpiry);
     const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
-    const parts = nseNearestExpiry.split('-');
+    const parts = nseTargetExpiry.split('-');
     const expiryDateObj = new Date(parseInt(parts[2]), months[parts[1]], parseInt(parts[0]));
     
     // T for IV calculation (calendar days / 365)
@@ -211,7 +221,7 @@ app.get('/api/option-chain', async (req, res) => {
       timestamp: new Date().toISOString(),
       expiryDates: expiries.map(formatExpiry),
       byExpiry: {
-        [nseNearestExpiry]: strikeRecords
+        [nseTargetExpiry]: strikeRecords
       }
     };
 
@@ -219,6 +229,26 @@ app.get('/api/option-chain', async (req, res) => {
     res.json(finalResponse);
   } catch (error) {
     console.error(`[/api/option-chain] Error for ${symbol}:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/expiries', (req, res) => {
+  try {
+    const symbol = req.query.symbol || 'NIFTY';
+    const expiries = getAvailableExpiries(symbol);
+    
+    const formatExpiry = (angelExp) => {
+      if (!angelExp || angelExp.length < 9) return angelExp;
+      const day = angelExp.slice(0, 2);
+      const month = angelExp.slice(2, 5);
+      const year = angelExp.slice(5);
+      const formattedMonth = month.charAt(0) + month.slice(1).toLowerCase();
+      return `${day}-${formattedMonth}-${year}`;
+    };
+
+    res.json({ expiries: expiries.map(formatExpiry) });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
