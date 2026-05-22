@@ -9,6 +9,7 @@ const activeSymbols = new Set();
 const prioritySymbols = new Set();
 const lastSnapshotTime = {};
 const lastRequestTime = {}; // For garbage collection
+const lastPolledTime = {}; // To prevent spamming the same symbol 3 times a second
 let isFetching = false;
 
 // Register symbols that users have in their portfolios
@@ -76,8 +77,12 @@ export const startPriceCacheLoop = () => {
       }
 
       if (targetSymbol) {
-        const port = process.env.PORT || 3001;
-        const res = await fetch(`http://localhost:${port}/api/option-chain?symbol=${targetSymbol}&force=true`);
+        const now = Date.now();
+        // Prevent polling the identical symbol faster than 1000ms to save API quota
+        if (!lastPolledTime[targetSymbol] || (now - lastPolledTime[targetSymbol] >= 1000)) {
+          lastPolledTime[targetSymbol] = now;
+          const port = process.env.PORT || 3001;
+          const res = await fetch(`http://localhost:${port}/api/option-chain?symbol=${targetSymbol}&force=true`);
         if (res.ok) {
           const data = await res.json();
           priceCache[targetSymbol] = {
@@ -95,6 +100,7 @@ export const startPriceCacheLoop = () => {
               data: data
             }).catch(e => console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message));
           }
+        }
         }
       }
     } catch (err) {

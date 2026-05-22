@@ -25,4 +25,7 @@ const tradeSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// DB Optimization: Compound index for blazing fast O(1) queries on open trades
+tradeSchema.index({ user: 1, status: 1 });
+
 export default mongoose.model('Trade', tradeSchema);

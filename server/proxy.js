@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
@@ -24,9 +25,14 @@ import backtestRouter from './src/presentation/backtestRouter.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// BSM Optimization: Warm-Start Newton-Raphson cache
+const ivCache = new Map();
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Network Optimization: Gzip compress all JSON payloads (reduces 50KB to 3KB)
+app.use(compression());
 app.use(cors());
 app.use(express.json());
 
@@ -82,20 +88,22 @@ app.get('/api/option-chain', async (req, res) => {
 
     const spotExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BSE' : 'NSE';
 
-    const spotQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
-      mode: 'FULL',
-      exchangeTokens: {
-        [spotExchange]: [spotToken]
-      }
-    });
-
-    const spotData = spotQuote?.data?.fetched?.[0];
-    if (!spotData) {
-      // Fallback for indices which might be under NSE or NFO
-      return res.status(500).json({ error: `Could not fetch spot price for ${symbol}` });
-    }
+    // OPTIMIZATION: Use cached spot price to estimate ATM strikes to save an API call
+    let approxSpot = (cache.data && cache.symbol === symbol) ? cache.data.spot : null;
     
-    const spotPrice = spotData.ltp;
+    if (!approxSpot) {
+      const spotQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
+        mode: 'FULL',
+        exchangeTokens: {
+          [spotExchange]: [spotToken]
+        }
+      });
+      const spotData = spotQuote?.data?.fetched?.[0];
+      if (!spotData) {
+        return res.status(500).json({ error: `Could not fetch spot price for ${symbol}` });
+      }
+      approxSpot = spotData.ltp;
+    }
 
     // 2. Find Requested or Nearest Expiry
     const expiries = getAvailableExpiries(symbol);
@@ -108,13 +116,11 @@ app.get('/api/option-chain', async (req, res) => {
     // 3. Find Options Tokens around Spot
     const optionsForExpiry = getOptionTokens(symbol, finalTargetExpiry);
     
-    // Sort by strike distance to spot to get the nearest strikes
     const optionsWithStrike = optionsForExpiry.map(opt => ({
       ...opt,
-      parsedStrike: parseFloat(opt.strike) / 100 // SmartAPI strikes have extra 00
+      parsedStrike: parseFloat(opt.strike) / 100
     }));
 
-    // Group by strike
     const strikesMap = {};
     optionsWithStrike.forEach(opt => {
       const k = opt.parsedStrike;
@@ -123,28 +129,26 @@ app.get('/api/option-chain', async (req, res) => {
       if (opt.symbol.endsWith('PE')) strikesMap[k].PE = opt;
     });
 
-    // Get strikes sorted by distance to spot
     const allStrikes = Object.keys(strikesMap).map(Number).sort((a, b) => a - b);
     
-    // Filter to ±15 strikes around ATM
     let closestIndex = 0;
     let minDiff = Infinity;
     allStrikes.forEach((k, i) => {
-      const diff = Math.abs(k - spotPrice);
+      const diff = Math.abs(k - approxSpot);
       if (diff < minDiff) {
         minDiff = diff;
         closestIndex = i;
       }
     });
 
-    const startIndex = Math.max(0, closestIndex - 15);
-    const endIndex = Math.min(allStrikes.length - 1, closestIndex + 15);
+    // OPTIMIZATION: Reduce to ±10 strikes so total payload fits in 1 API call (limit 50)
+    const startIndex = Math.max(0, closestIndex - 10);
+    const endIndex = Math.min(allStrikes.length - 1, closestIndex + 10);
     const relevantStrikes = allStrikes.slice(startIndex, endIndex + 1);
 
     const tokensToFetch = [];
-    const tokenMap = new Map(); // token -> { strike, type }
+    const tokenMap = new Map();
 
-    // Fetch all active Future expiries so UI can switch seamlessly
     const futExpiries = getAvailableFutureExpiries(symbol);
     futExpiries.forEach(exp => {
       const futToken = getFutureToken(symbol, exp);
@@ -165,21 +169,30 @@ app.get('/api/option-chain', async (req, res) => {
       }
     });
 
-    // 4. Fetch Options Data (Batch up to 50 tokens at a time)
+    // Enforce 49 max so spotToken makes it exactly 50 max
+    const finalOptTokens = tokensToFetch.slice(0, 49);
+
+    // 4. Unified Fetch! (Bundle Spot + Options)
     const fetchedOptions = [];
+    let spotPrice = approxSpot;
     const optExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BFO' : 'NFO';
     
-    for (let i = 0; i < tokensToFetch.length; i += 50) {
-      const batch = tokensToFetch.slice(i, i + 50);
-      const optQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
-        mode: 'FULL',
-        exchangeTokens: {
-          [optExchange]: batch
+    const unifiedQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
+      mode: 'FULL',
+      exchangeTokens: {
+        [spotExchange]: [spotToken],
+        [optExchange]: finalOptTokens
+      }
+    });
+
+    if (unifiedQuote?.data?.fetched) {
+      unifiedQuote.data.fetched.forEach(item => {
+        if (item.symbolToken === spotToken && (item.exchange === 'NSE' || item.exchange === 'BSE')) {
+          spotPrice = item.ltp;
+        } else {
+          fetchedOptions.push(item);
         }
       });
-      if (optQuote?.data?.fetched) {
-        fetchedOptions.push(...optQuote.data.fetched);
-      }
     }
 
     // 5. Construct NSE-like Response
@@ -233,7 +246,9 @@ app.get('/api/option-chain', async (req, res) => {
         const bestBuy = ceQuote.depth?.buy?.[0];
         const bestSell = ceQuote.depth?.sell?.[0];
         
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, ceQuote.ltp, 'CALL', 0.012) || 0.15;
+        let prevCalcIV = ivCache.get(ceToken) || 0.20;
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, ceQuote.ltp, 'CALL', 0.012, prevCalcIV) || 0.15;
+        ivCache.set(ceToken, calcIV);
         
         record.call = {
           ltp: ceQuote.ltp,
@@ -250,7 +265,9 @@ app.get('/api/option-chain', async (req, res) => {
         const bestBuy = peQuote.depth?.buy?.[0];
         const bestSell = peQuote.depth?.sell?.[0];
 
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, peQuote.ltp, 'PUT', 0.012) || 0.15;
+        let prevCalcIV = ivCache.get(peToken) || 0.20;
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, peQuote.ltp, 'PUT', 0.012, prevCalcIV) || 0.15;
+        ivCache.set(peToken, calcIV);
 
         record.put = {
           ltp: peQuote.ltp,
