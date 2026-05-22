@@ -985,17 +985,26 @@ export default function ThetaDecaySimulator() {
       // Populate chain strikes for dropdown
       const strikes = chain.byExpiry?.[expiries[0]] || [];
       setChainStrikes(strikes);
-      const atm = findATMStrike(chain, expiries[0], chain.spot);
-      if (atm) {
-        setStrikePrice(atm.strikePrice);
-        const relevantIV = optionType === 'CALL' ? atm.call?.iv : atm.put?.iv;
+      
+      // Keep existing strike if it exists in the new chain, otherwise find ATM
+      let targetStrike = null;
+      if (strikePrice > 0) {
+        targetStrike = strikes.find(s => s.strikePrice === strikePrice);
+      }
+      if (!targetStrike) {
+        targetStrike = findATMStrike(chain, expiries[0], chain.spot);
+        if (targetStrike) setStrikePrice(targetStrike.strikePrice);
+      }
+
+      if (targetStrike) {
+        const relevantIV = optionType === 'CALL' ? targetStrike.call?.iv : targetStrike.put?.iv;
         if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
         // Auto-fill market premium from the live LTP
-        const ltp = optionType === 'CALL' ? atm.call?.ltp : atm.put?.ltp;
+        const ltp = optionType === 'CALL' ? targetStrike.call?.ltp : targetStrike.put?.ltp;
         if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
       }
     }
-  }, [optionType]);
+  }, [optionType, strikePrice]);
 
   // When user picks a different strike from chain dropdown, update IV + market premium
   const handleChainStrikeChange = useCallback((newStrike) => {
@@ -1008,6 +1017,18 @@ export default function ThetaDecaySimulator() {
       if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
     }
   }, [chainStrikes, optionType]);
+
+  // When user toggles CALL/PUT, update IV + market premium
+  const handleTypeChange = useCallback((newType) => {
+    setOptionType(newType);
+    const strikeData = chainStrikes.find(s => s.strikePrice === strikePrice);
+    if (strikeData) {
+      const relevantIV = newType === 'CALL' ? strikeData.call?.iv : strikeData.put?.iv;
+      if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
+      const ltp = newType === 'CALL' ? strikeData.call?.ltp : strikeData.put?.ltp;
+      if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
+    }
+  }, [chainStrikes, strikePrice]);
 
   //  Derived 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -1119,7 +1140,7 @@ export default function ThetaDecaySimulator() {
             <label className="block text-xs font-medium text-[#e6edf3] mb-1">Type</label>
             <div className="flex rounded-lg overflow-hidden border border-[#30363d]">
               <button
-                onClick={() => setOptionType('CALL')}
+                onClick={() => handleTypeChange('CALL')}
                 className={`flex-1 py-2 text-xs font-bold transition-colors cursor-pointer ${
                   optionType === 'CALL'
                     ? 'bg-[#3fb95020] text-[#3fb950] border-r border-[#30363d]'
@@ -1127,7 +1148,7 @@ export default function ThetaDecaySimulator() {
                 }`}
               >CALL</button>
               <button
-                onClick={() => setOptionType('PUT')}
+                onClick={() => handleTypeChange('PUT')}
                 className={`flex-1 py-2 text-xs font-bold transition-colors cursor-pointer ${
                   optionType === 'PUT'
                     ? 'bg-[#f8514920] text-[#f85149]'
