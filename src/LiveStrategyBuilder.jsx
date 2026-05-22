@@ -85,14 +85,17 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       
       if (leg.type === 'future') {
         newPremium = live.data.futurePrice || live.data.spot || 0;
-      } else if (live.data.currentExpiry) {
-        const strikeData = live.data.strikeRecords?.find(s => s.strike === leg.strike);
-        if (strikeData) {
-          const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
-          if (optData) {
-            const bid = optData.bidPrice || optData.ltp || 0;
-            const ask = optData.askPrice || optData.ltp || 0;
-            newPremium = leg.action === 'sell' ? bid : ask;
+      } else if (live.data.byExpiry && leg.expiry) {
+        const records = live.data.byExpiry[leg.expiry];
+        if (records) {
+          const strikeData = records.find(s => (s.strikePrice || s.strike) === leg.strike);
+          if (strikeData) {
+            const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
+            if (optData) {
+              const bid = optData.bidPrice || optData.ltp || 0;
+              const ask = optData.askPrice || optData.ltp || 0;
+              newPremium = leg.action === 'sell' ? bid : ask;
+            }
           }
         }
       }
@@ -282,15 +285,85 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       {/* Metrics Bar */}
       <StrategyMetricsBar legs={legs} globalInputs={globalInputs} />
 
-      {/* Margin Warning */}
-      {estimatedMargin > 0 && (
-        <div className="flex items-start justify-between gap-2 text-xs text-[#8b949e] bg-[#30363d]/30 p-3 rounded border border-[#30363d]">
-          <div className="flex items-start gap-2">
-            <AlertCircle size={14} className="mt-0.5 shrink-0" />
-            <p>
-              Estimated Margin Blocked: <strong className="text-[#e3b341]">₹{(estimatedMargin / 100000).toFixed(2)}L</strong>. Actual margin by your broker involves SPAN/Exposure and will differ.
-            </p>
+      {/* Detailed Margin Breakdown */}
+      {estimatedMargin?.totalMarginRequired > 0 && (
+        <div className="card p-4 space-y-4">
+          <div className="flex items-center gap-2 border-b border-[#30363d] pb-2">
+            <AlertCircle size={16} className="text-[#e3b341]" />
+            <h3 className="text-sm font-semibold text-[#e6edf3]">Margin Requirements</h3>
           </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-xs text-[#8b949e]">
+            {/* Column 1 */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span>Span Margin:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.spanMargin.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Additional Margin:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.additionalMargin.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Pre Expiry Margin:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.preExpiryMargin.toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Column 2 */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span>Exposure Margin:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.exposureMargin.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Special Margin:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.specialMargin.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Tender Margin:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.tenderMargin.toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Column 3 */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span>Exposure Spread Benefit:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.exposureSpreadBenefit.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Delivery Margin:</span>
+                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.deliveryMargin.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center font-bold text-[#e6edf3] mt-2 pt-2 border-t border-[#30363d]/50">
+                <span>Total Margin Required:</span>
+                <span className="font-mono text-[#58a6ff] bg-[#58a6ff]/10 border border-[#58a6ff]/30 px-2 py-1 rounded min-w-[100px] text-right">
+                  {estimatedMargin.totalMarginRequired.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <p className="text-[10px] text-[#8b949e] italic mt-4">
+            *This is an estimated rule-based approximation for strategy building purposes. Actual broker margins will vary based on live volatility parameters and exchange SPAN files.
+          </p>
         </div>
       )}
 

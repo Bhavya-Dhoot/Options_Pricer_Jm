@@ -17,7 +17,19 @@ export const getLotSize = (symbol) => {
 };
 
 export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
-  if (!legs || legs.length === 0 || !spotPrice) return 0;
+  const zeroMargin = {
+    spanMargin: 0,
+    exposureMargin: 0,
+    additionalMargin: 0,
+    preExpiryMargin: 0,
+    exposureSpreadBenefit: 0,
+    specialMargin: 0,
+    tenderMargin: 0,
+    deliveryMargin: 0,
+    totalMarginRequired: 0
+  };
+
+  if (!legs || legs.length === 0 || !spotPrice) return zeroMargin;
   
   const lotSize = getLotSize(symbol);
   
@@ -102,5 +114,19 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
     totalMargin += futureMargin;
   });
   
-  return totalMargin;
+  // Split into SPAN and Exposure (Approximation: 80% SPAN, 20% Exposure)
+  const spanMargin = totalMargin * 0.80;
+  const exposureMargin = totalMargin * 0.20;
+  
+  return {
+    spanMargin: spanMargin,
+    exposureMargin: exposureMargin,
+    additionalMargin: 0,
+    preExpiryMargin: 0,
+    exposureSpreadBenefit: 0,
+    specialMargin: 0,
+    tenderMargin: 0,
+    deliveryMargin: 0,
+    totalMarginRequired: totalMargin
+  };
 }
