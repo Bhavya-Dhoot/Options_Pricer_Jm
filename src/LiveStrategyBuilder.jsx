@@ -11,7 +11,8 @@ export default function LiveStrategyBuilder({ live }) {
   const [targetExpiry, setTargetExpiry] = useState('');
   
   // Custom hook to fetch expiries
-  const { expiries, isLoading: isExpiriesLoading } = useAvailableExpiries(live.data?.symbol || 'NIFTY');
+  const expiries = useAvailableExpiries(live.data?.symbol || 'NIFTY') || [];
+  const isExpiriesLoading = expiries.length === 0;
 
   useEffect(() => {
     if (expiries.length > 0 && !targetExpiry) {
