@@ -1,7 +1,7 @@
 import React from 'react';
 import { Trash2, Plus } from 'lucide-react';
 
-export default function LiveLegConfigurator({ legs, availableStrikes = [], onUpdateLeg, onAddLeg, onRemoveLeg, futurePrice }) {
+export default function LiveLegConfigurator({ legs, expiryDates = [], byExpiry = {}, onUpdateLeg, onAddLeg, onRemoveLeg, futurePrice, fetchExpiry }) {
   const getBadgeColor = (type, action) => {
     if (type === 'call' && action === 'buy') return 'text-green-400';
     if (type === 'put' && action === 'buy') return 'text-red-400';
@@ -19,7 +19,7 @@ export default function LiveLegConfigurator({ legs, availableStrikes = [], onUpd
           <tr className="border-b border-[#30363d] text-[10px] text-[#8b949e] uppercase tracking-wider">
             <th className="pb-2 font-medium w-6">#</th>
             <th className="pb-2 font-medium w-32">Leg</th>
-            <th className="pb-2 font-medium w-32">Strike</th>
+            <th className="pb-2 font-medium w-48">Expiry & Strike</th>
             <th className="pb-2 font-medium w-20">Lots</th>
             <th className="pb-2 font-medium w-24">Entry Price</th>
             <th className="pb-2 font-medium w-24">Breakeven</th>
@@ -57,16 +57,45 @@ export default function LiveLegConfigurator({ legs, availableStrikes = [], onUpd
                     FUT
                   </span>
                 ) : (
-                  <select
-                    value={leg.strike}
-                    onChange={e => onUpdateLeg(leg.id, { strike: Number(e.target.value) })}
-                    className="w-28 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] font-mono focus:border-[#58a6ff] focus:outline-none"
-                  >
-                    <option value={leg.strike} disabled hidden>{leg.strike}</option>
-                    {availableStrikes.map(strike => (
-                      <option key={strike} value={strike}>{strike}</option>
-                    ))}
-                  </select>
+                  <div className="flex flex-col gap-1 w-44">
+                    <select
+                      value={leg.expiry || ''}
+                      onChange={e => {
+                        const newExp = e.target.value;
+                        if (fetchExpiry) fetchExpiry(newExp);
+                        onUpdateLeg(leg.id, { expiry: newExp });
+                      }}
+                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] text-[10px] uppercase focus:border-[#58a6ff] focus:outline-none"
+                    >
+                      <option value="" disabled hidden>Select Expiry</option>
+                      {expiryDates.map(exp => (
+                        <option key={exp} value={exp}>{exp}</option>
+                      ))}
+                    </select>
+                    
+                    <select
+                      value={leg.strike}
+                      onChange={e => onUpdateLeg(leg.id, { strike: Number(e.target.value) })}
+                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] font-mono focus:border-[#58a6ff] focus:outline-none"
+                    >
+                      <option value={leg.strike} disabled hidden>{leg.strike}</option>
+                      {leg.expiry && byExpiry[leg.expiry] ? (
+                        byExpiry[leg.expiry].map(s => {
+                          const opt = leg.type === 'call' ? s.call : s.put;
+                          let priceText = '';
+                          if (opt) {
+                            const p = leg.action === 'sell' ? (opt.bidPrice || opt.ltp) : (opt.askPrice || opt.ltp);
+                            priceText = ` (₹${(p || 0).toFixed(1)})`;
+                          }
+                          return (
+                            <option key={s.strike} value={s.strike}>
+                              {s.strike}{priceText}
+                            </option>
+                          );
+                        })
+                      ) : null}
+                    </select>
+                  </div>
                 )}
               </td>
               <td className="py-2.5">

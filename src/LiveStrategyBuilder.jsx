@@ -127,9 +127,12 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
   };
 
   const availableStrikes = useMemo(() => {
-    if (!live.data?.strikeRecords) return [];
-    return live.data.strikeRecords.map(s => s.strike);
-  }, [live.data]);
+    if (!live.data?.byExpiry) return [];
+    const targetExp = targetExpiry || live.data.expiryDates?.[0];
+    const records = live.data.byExpiry[targetExp];
+    if (!records) return [];
+    return records.map(s => s.strike);
+  }, [live.data, targetExpiry]);
 
   const getLotSize = (sym) => {
     if (sym === 'BANKNIFTY') return 15;
@@ -145,15 +148,20 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       ? Math.round(live.data.spot / 50) * 50 
       : 24500;
       
+    const exp = targetExpiry || live.data?.expiryDates?.[0];
+    
     let initialPremium = 0;
     if (type === 'future') {
       initialPremium = live.data?.futurePrice || live.data?.spot || 0;
-    } else if (live.data?.strikeRecords) {
-      const strikeData = live.data.strikeRecords.find(s => s.strike === defaultStrike);
-      if (strikeData) {
-        const optData = type === 'call' ? strikeData.call : strikeData.put;
-        if (optData) {
-          initialPremium = optData.askPrice || optData.ltp || 0;
+    } else if (live.data?.byExpiry && exp) {
+      const records = live.data.byExpiry[exp];
+      if (records) {
+        const strikeData = records.find(s => s.strike === defaultStrike);
+        if (strikeData) {
+          const optData = type === 'call' ? strikeData.call : strikeData.put;
+          if (optData) {
+            initialPremium = optData.askPrice || optData.ltp || 0;
+          }
         }
       }
     }
@@ -166,35 +174,47 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       qty: 1,
       premium: initialPremium,
       lotSize: getLotSize(live.data?.symbol),
-      T: type === 'future' ? (globalInputs.farDte / 365) : (globalInputs.dte / 365)
+      T: type === 'future' ? (globalInputs.farDte / 365) : (calculateDTE(exp) / 365),
+      expiry: exp
     }]);
   };
 
   const updateLeg = (id, updates) => {
     setLegs(prev => prev.map(l => {
       if (l.id !== id) return l;
-      const updated = { ...l, ...updates };
       
-      // Auto-bind premium if strike or type or action changes
-      if (updates.strike !== undefined || updates.type !== undefined || updates.action !== undefined) {
+      const updated = { ...l, ...updates };
+      const exp = updated.expiry || targetExpiry || live.data?.expiryDates?.[0];
+      
+      // If expiry changed, we might need to fetch it (handled by LiveLegConfigurator calling fetchNow), 
+      // but let's recompute T
+      if (updates.expiry !== undefined) {
+        updated.T = calculateDTE(updates.expiry) / 365;
+      }
+      
+      // Auto-bind premium if strike, type, action, or expiry changes
+      if (updates.strike !== undefined || updates.type !== undefined || updates.action !== undefined || updates.expiry !== undefined) {
         if (updated.type === 'future') {
           updated.premium = live.data?.futurePrice || live.data?.spot || 0;
           updated.strike = 0; // Futures don't have a strike
-        } else if (live.data?.strikeRecords) {
-          // If switching from Future to Option, assign an ATM strike
-          if (updated.strike === 0) {
-            const defaultStrike = live.data?.spot 
-              ? Math.round(live.data.spot / 50) * 50 
-              : 24500;
-            updated.strike = defaultStrike;
-          }
-          const strikeData = live.data.strikeRecords.find(s => s.strike === updated.strike);
-          if (strikeData) {
-            const optData = updated.type === 'call' ? strikeData.call : strikeData.put;
-            if (optData) {
-              const bid = optData.bidPrice || optData.ltp || 0;
-              const ask = optData.askPrice || optData.ltp || 0;
-              updated.premium = updated.action === 'sell' ? bid : ask;
+        } else if (live.data?.byExpiry && exp) {
+          const records = live.data.byExpiry[exp];
+          if (records) {
+            // If switching from Future to Option, assign an ATM strike
+            if (updated.strike === 0) {
+              const defaultStrike = live.data?.spot 
+                ? Math.round(live.data.spot / 50) * 50 
+                : 24500;
+              updated.strike = defaultStrike;
+            }
+            const strikeData = records.find(s => s.strike === updated.strike);
+            if (strikeData) {
+              const optData = updated.type === 'call' ? strikeData.call : strikeData.put;
+              if (optData) {
+                const bid = optData.bidPrice || optData.ltp || 0;
+                const ask = optData.askPrice || optData.ltp || 0;
+                updated.premium = updated.action === 'sell' ? bid : ask;
+              }
             }
           }
         }
@@ -281,11 +301,17 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
         <div className="card p-4">
           <LiveLegConfigurator 
             legs={legs}
-            availableStrikes={availableStrikes}
+            expiryDates={live.data?.expiryDates || []}
+            byExpiry={live.data?.byExpiry || {}}
             onUpdateLeg={updateLeg}
             onAddLeg={addLeg}
             onRemoveLeg={removeLeg}
             futurePrice={live.data?.futurePrice}
+            fetchExpiry={(exp) => {
+              if (live.data?.symbol && !live.data?.byExpiry?.[exp]) {
+                live.fetchNow(live.data.symbol, { force: false, expiry: exp, futExpiry: targetFutExpiry });
+              }
+            }}
           />
         </div>
 

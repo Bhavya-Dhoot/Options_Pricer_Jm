@@ -55,7 +55,18 @@ export function useLiveData() {
 
       const json = await res.json();
       console.log(`[useLiveData] Got ${symbol}: spot=${json.spot}, cached=${json.cached}, timestamp=${json.timestamp}`);
-      setData(json);
+      
+      setData(prev => {
+        if (!prev || prev.symbol !== json.symbol) return json;
+        return {
+          ...json,
+          byExpiry: {
+            ...prev.byExpiry,
+            ...json.byExpiry
+          }
+        };
+      });
+      
       setLastUpdate(new Date());
       setIsLoading(false);
       return json;
