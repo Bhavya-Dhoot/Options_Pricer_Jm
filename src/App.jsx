@@ -4,6 +4,8 @@ import OptionsPricer from './OptionsPricer.jsx';
 import ThetaDecaySimulator from './ThetaDecaySimulator.jsx';
 import OptionsStrategies from './OptionsStrategies.jsx';
 import LiveStrategyBuilder from './LiveStrategyBuilder.jsx';
+import AuthPage from './AuthPage.jsx';
+import PaperTradeDashboard from './PaperTradeDashboard.jsx';
 import { useLiveData } from './useLiveData.js';
 
 const TABS = [
@@ -11,10 +13,12 @@ const TABS = [
   { id: 'theta',  label: 'Theta Decay',   icon: Clock },
   { id: 'live_strategy', label: 'Strategy Builder', icon: BarChart2 },
   { id: 'strategies', label: 'Options Strategies', icon: BarChart2 },
+  { id: 'paper', label: 'Paper Trading', icon: BarChart2 },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('pricer');
+  const [user, setUser] = useState(null);
   const live = useLiveData();
   const riskFreeRate = 6.5;
 
@@ -63,6 +67,13 @@ export default function App() {
           liveIV={live.data?.iv ?? 0.15}
           riskFreeRate={riskFreeRate}
         />
+      </div>
+      <div style={{ display: activeTab === 'paper' ? 'block' : 'none' }}>
+        {!user ? (
+          <AuthPage onLogin={(userData) => setUser(userData)} />
+        ) : (
+          <PaperTradeDashboard user={user} onLogout={() => { localStorage.removeItem('auth_token'); setUser(null); }} />
+        )}
       </div>
     </div>
   );

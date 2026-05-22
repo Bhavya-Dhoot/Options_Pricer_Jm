@@ -13,6 +13,9 @@ import {
   getLotSize 
 } from './scripMaster.js';
 import { solveImpliedIV } from '../src/bsm.js';
+import { connectDB } from './src/infrastructure/db.js';
+import authRouter from './src/presentation/authRouter.js';
+import tradeRouter from './src/presentation/tradeRouter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,6 +24,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
+app.use(express.json());
+
+connectDB();
+
+app.use('/api/auth', authRouter);
+app.use('/api/trades', tradeRouter);
 
 // Serve static frontend from 'dist' directory in production
 app.use(express.static(path.join(__dirname, '../dist')));

@@ -232,6 +232,45 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
 
   const removeLeg = (id) => setLegs(prev => prev.filter(l => l.id !== id));
 
+  const handlePaperTrade = async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      alert('You must be logged in to Paper Trade! Please click the Paper Trading tab.');
+      return;
+    }
+    
+    if (legs.length === 0) {
+      alert('Add at least one leg to the strategy first.');
+      return;
+    }
+
+    try {
+      for (const leg of legs) {
+        await fetch('/api/trades', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            symbol: live.data?.symbol || 'NIFTY',
+            type: leg.type,
+            strike: leg.strike,
+            expiry: leg.type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : (leg.expiry || targetExpiry || live.data?.expiryDates?.[0]),
+            action: leg.action,
+            orderType: 'market',
+            qty: leg.qty,
+            lotSize: leg.lotSize || 25,
+            entryPrice: leg.premium
+          })
+        });
+      }
+      alert('Strategy successfully executed in Paper Trading Portfolio!');
+    } catch (err) {
+      alert('Failed to place paper trade. Check your connection.');
+    }
+  };
+
   const estimatedMargin = useMemo(() => {
     return estimateMargin(legs, live.data?.spot || 24500, live.data?.symbol || 'NIFTY');
   }, [legs, live.data]);
@@ -287,7 +326,17 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       </div>
 
       {/* Metrics Bar */}
-      <StrategyMetricsBar legs={legs} globalInputs={globalInputs} />
+      <div className="flex flex-col lg:flex-row gap-4 items-center">
+        <div className="flex-1 w-full">
+          <StrategyMetricsBar legs={legs} globalInputs={globalInputs} />
+        </div>
+        <button 
+          onClick={handlePaperTrade}
+          className="w-full lg:w-auto px-6 py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+        >
+          <BarChart2 size={18} /> Send to Paper Trade
+        </button>
+      </div>
 
       {/* Full Width Layout */}
       <div className="space-y-6">
