@@ -8,16 +8,20 @@ Built with React 19, Vite 8, Recharts, and a Node.js Express Backend.
 
 ## Intelligent Architectural Decisions
 
-### 🚦 Advanced API Rate Limiting (Token Bucket Round-Robin)
+### 🚦 Advanced API Rate Limiting & Garbage Collection
 To comply with strict broker API limits (3 requests per second) while supporting concurrent users, the backend utilizes a sophisticated **Round-Robin Queue Manager**.
 - It guarantees exactly 3 HTTP requests are dispatched per second (1 every 333ms).
 - It features a **1/3 Priority Guarantee**: If a Super User (e.g., admin) queues requests, the manager guarantees that every 3rd request is pulled exclusively from the High Priority Queue, ensuring VIP users never experience bottlenecks from standard traffic.
+- **Memory & Bandwidth Garbage Collection**: Active symbols are tracked by their last request time. If a symbol hasn't been accessed in 10 minutes and is not part of an active portfolio, the `priceCache` microservice dynamically prunes it, preventing bandwidth leaks and avoiding IP bans.
+
+### 🛡️ Holistic Spread Margin Engine
+Instead of checking margins on a leg-by-leg basis (which destroys margin benefits), the backend employs a **Batch Trading & Holistic Margin Engine**. When users submit complex setups (like Iron Condors or Butterfly Spreads), the system mathematically pairs short options with offsetting long hedges *before* executing the database transactions. This limits the required margin to the precise maximum loss of the spread instead of the combined naked margin.
+
+### 🧱 Atomic Concurrency Data Layer
+For the Paper Trading portfolio, the backend completely abandons standard `document.save()` ORM patterns which suffer from race conditions. Instead, it leverages MongoDB atomic `$inc` operators (`findOneAndUpdate({ $inc: ... })`) to process real-time PnL modifications and capital updates. This guarantees zero race-conditions or mathematical drift when hundreds of trades are closed concurrently.
 
 ### 📈 Probability of Profit (POP) via Lognormal Integration
 Instead of basic standard-deviation approximations, the Probability Engine uses a full **Lognormal PDF Integration** derived from the BSM model. It computes the risk-neutral drift `(r - q - σ²/2)` and standard deviation `σ√T`, then numerically integrates the probability mass function across the entire range of profitable intrinsic values at expiry.
-
-### 🛡️ Smart Hedge Margin Calculator
-The margin estimation system behaves closely to NSE SPAN margin rules. If you build a complex multi-leg strategy (e.g., Iron Condor), the backend's `processShorts` algorithm intelligently detects offsetting long legs and automatically pairs them with naked short legs, reducing the required margin strictly to the maximum loss (width of the spread) rather than calculating them as independent naked shorts.
 
 ### ⚡ Unified Paper Trading Terminal
 The Strategy Builder is deeply integrated into the Paper Trading Dashboard. Unauthenticated users get a pure mathematical sandbox, while authenticated users can save custom templates, utilize 1-click strategy generation (Straddles, Spreads, Condors), and execute virtual trades seamlessly into a MongoDB portfolio with real-time MTM (Mark-To-Market) tracking.

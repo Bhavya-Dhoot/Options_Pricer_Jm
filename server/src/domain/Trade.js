@@ -16,6 +16,7 @@ const tradeSchema = new mongoose.Schema({
   
   qty: { type: Number, required: true },
   lotSize: { type: Number, required: true },
+  marginBlocked: { type: Number, default: 0 },
   
   exitPrice: { type: Number },
   exitTime: { type: Date },

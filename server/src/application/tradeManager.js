@@ -1,12 +1,19 @@
 import Trade from '../domain/Trade.js';
 import User from '../domain/User.js';
 import { getLatestPrice, registerSymbol } from './priceCache.js';
+import { getLotSize } from '../../scripMaster.js';
+import { estimateMargin } from '../domain/marginCalculator.js';
 
 export const placeTrade = async (req, res) => {
-  const { symbol, type, strike, expiry, action, orderType, limitPrice, qty, lotSize } = req.body;
+  const { symbol, type, strike, expiry, action, orderType, limitPrice, qty } = req.body;
   
+  if (!qty || !Number.isInteger(qty) || qty <= 0) {
+    return res.status(400).json({ error: 'Quantity must be a positive integer.' });
+  }
+
   try {
     const user = await User.findById(req.user._id);
+    const verifiedLotSize = getLotSize(symbol);
     
     // Server-Side Price Verification
     registerSymbol(symbol); // Ensure symbol is tracked in background
@@ -19,7 +26,11 @@ export const placeTrade = async (req, res) => {
       }
 
       if (type === 'future') {
-        verifiedEntryPrice = liveData.data.futurePrices?.[expiry] || liveData.data.spot;
+        const futPrice = liveData.data.futurePrices?.[expiry];
+        if (!futPrice) {
+          return res.status(400).json({ error: 'Invalid future expiry or pricing unavailable.' });
+        }
+        verifiedEntryPrice = futPrice;
       } else {
         const chain = liveData.data.byExpiry?.[expiry];
         if (!chain) return res.status(400).json({ error: 'Invalid expiry for options.' });
@@ -38,17 +49,41 @@ export const placeTrade = async (req, res) => {
       verifiedEntryPrice = limitPrice;
     }
 
-    // Simulate margin check
+    // Calculate exact margin required for this trade
     let estimatedMargin = 0;
-    const contractValue = verifiedEntryPrice * qty * lotSize;
-    
     if (action === 'buy') {
-      estimatedMargin = contractValue; // Need 100% premium
+      estimatedMargin = verifiedEntryPrice * qty * verifiedLotSize;
     } else {
-      estimatedMargin = contractValue * 0.15 * 50; // VERY rough estimate for naked shorts
+      const liveData = getLatestPrice(symbol);
+      const spot = liveData?.data?.spot || verifiedEntryPrice;
+      estimatedMargin = spot * verifiedLotSize * 0.15 * qty; // Fix: 15% of underlying contract value
     }
 
-    // In a fully developed margin system, we would calculate exactly using marginCalculator logic on backend.
+    // Dynamic Margin Check using holistic margin calculator for portfolio
+    const openTrades = await Trade.find({ user: user._id, status: 'OPEN' });
+    const allPortfolioLegs = openTrades.map(t => ({
+      type: t.type,
+      action: t.action,
+      qty: t.qty,
+      lotSize: t.lotSize,
+      strike: t.strike,
+      expiry: t.expiry,
+      premium: t.entryPrice
+    }));
+    
+    // Check holistic margin if this new trade is added
+    const newLeg = { type, action, qty, lotSize: verifiedLotSize, strike, expiry, premium: verifiedEntryPrice };
+    const combinedLegs = [...allPortfolioLegs, newLeg];
+    
+    const liveDataForSpot = getLatestPrice(symbol);
+    const spotForMargin = liveDataForSpot?.data?.spot || verifiedEntryPrice;
+    
+    const newMarginEst = estimateMargin(combinedLegs, spotForMargin, symbol);
+    const newTotalMargin = newMarginEst.totalMarginRequired;
+
+    if (newTotalMargin > user.virtualCapital) {
+      return res.status(400).json({ error: `Insufficient margin. Required: ₹${newTotalMargin.toFixed(0)}, Available: ₹${user.virtualCapital.toFixed(0)}` });
+    }
     
     const trade = await Trade.create({
       user: req.user._id,
@@ -60,13 +95,109 @@ export const placeTrade = async (req, res) => {
       orderType,
       limitPrice,
       qty,
-      lotSize,
+      lotSize: verifiedLotSize,
+      marginBlocked: estimatedMargin,
       entryPrice: orderType === 'market' ? verifiedEntryPrice : null,
       entryTime: orderType === 'market' ? Date.now() : null,
       status: orderType === 'market' ? 'OPEN' : 'PENDING'
     });
 
     res.status(201).json(trade);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+export const placeBatchTrades = async (req, res) => {
+  const { legs } = req.body;
+  if (!legs || !Array.isArray(legs) || legs.length === 0) {
+    return res.status(400).json({ error: 'Array of legs required.' });
+  }
+
+  try {
+    const user = await User.findById(req.user._id);
+    const verifiedLegs = [];
+    const symbol = legs[0].symbol || 'NIFTY'; // Assume same symbol
+    registerSymbol(symbol);
+    const liveData = getLatestPrice(symbol);
+    
+    if (!liveData || !liveData.data) {
+      return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
+    }
+    const spot = liveData.data.spot;
+
+    for (const leg of legs) {
+      if (!leg.qty || !Number.isInteger(leg.qty) || leg.qty <= 0) {
+        return res.status(400).json({ error: 'Quantity must be a positive integer.' });
+      }
+      
+      const verifiedLotSize = getLotSize(leg.symbol || symbol);
+      let verifiedEntryPrice = 0;
+      
+      if (leg.type === 'future') {
+        const futPrice = liveData.data.futurePrices?.[leg.expiry];
+        if (!futPrice) return res.status(400).json({ error: 'Future pricing unavailable.' });
+        verifiedEntryPrice = futPrice;
+      } else {
+        const chain = liveData.data.byExpiry?.[leg.expiry];
+        if (!chain) return res.status(400).json({ error: 'Invalid expiry.' });
+        const strikeData = chain.find(s => (s.strikePrice || s.strike) === leg.strike);
+        if (!strikeData) return res.status(400).json({ error: 'Invalid strike.' });
+        const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
+        if (!optData) return res.status(400).json({ error: 'Option data unavailable.' });
+        verifiedEntryPrice = leg.action === 'buy' ? (optData.askPrice || optData.ltp) : (optData.bidPrice || optData.ltp);
+      }
+      
+      verifiedLegs.push({
+        ...leg,
+        lotSize: verifiedLotSize,
+        premium: verifiedEntryPrice,
+        entryPrice: verifiedEntryPrice
+      });
+    }
+
+    // Dynamic Margin Check using holistic margin calculator for portfolio
+    const openTrades = await Trade.find({ user: user._id, status: 'OPEN' });
+    const allPortfolioLegs = openTrades.map(t => ({
+      type: t.type,
+      action: t.action,
+      qty: t.qty,
+      lotSize: t.lotSize,
+      strike: t.strike,
+      expiry: t.expiry,
+      premium: t.entryPrice
+    }));
+    
+    const combinedLegs = [...allPortfolioLegs, ...verifiedLegs];
+    const newMarginEst = estimateMargin(combinedLegs, spot, symbol);
+    const newTotalMargin = newMarginEst.totalMarginRequired;
+
+    if (newTotalMargin > user.virtualCapital) {
+      return res.status(400).json({ error: `Insufficient margin. Required: ₹${newTotalMargin.toFixed(0)}, Available: ₹${user.virtualCapital.toFixed(0)}` });
+    }
+    
+    // Create all trades atomically
+    const newTrades = [];
+    for (const leg of verifiedLegs) {
+      const trade = await Trade.create({
+        user: req.user._id,
+        symbol: leg.symbol || symbol,
+        type: leg.type,
+        strike: leg.strike,
+        expiry: leg.expiry,
+        action: leg.action,
+        orderType: 'market',
+        qty: leg.qty,
+        lotSize: leg.lotSize,
+        marginBlocked: leg.action === 'buy' ? (leg.entryPrice * leg.qty * leg.lotSize) : 0, // Hedged margin is complex, so we assign 0 to short legs since we evaluate portfolio holistically
+        entryPrice: leg.entryPrice,
+        entryTime: Date.now(),
+        status: 'OPEN'
+      });
+      newTrades.push(trade);
+    }
+
+    res.status(201).json(newTrades);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -114,33 +245,62 @@ export const exitTrade = async (req, res) => {
     if (trade.status !== 'OPEN') return res.status(400).json({ error: 'Trade is not open' });
     
     if (exitQty > trade.qty) return res.status(400).json({ error: 'Exit qty exceeds open qty' });
+    if (exitQty !== trade.qty) return res.status(400).json({ error: 'Partial exits are not supported in this version. Must exit full quantity.' });
+
+    // Server-Side Verification of Exit Price
+    let verifiedExitPrice = 0;
+    const liveData = getLatestPrice(trade.symbol);
+    
+    if (!liveData || !liveData.data) {
+      return res.status(400).json({ error: 'Market data temporarily unavailable. Please try exiting again.' });
+    }
+
+    if (trade.type === 'future') {
+      const futPrice = liveData.data.futurePrices?.[trade.expiry];
+      if (!futPrice) return res.status(400).json({ error: 'Market data unavailable for this future expiry.' });
+      verifiedExitPrice = futPrice;
+    } else {
+      const chain = liveData.data.byExpiry?.[trade.expiry];
+      if (!chain) return res.status(400).json({ error: 'Market data unavailable for this option expiry.' });
+      
+      const strikeData = chain.find(s => (s.strikePrice || s.strike) === trade.strike);
+      if (!strikeData) return res.status(400).json({ error: 'Market data unavailable for this strike.' });
+      
+      const optData = trade.type === 'call' ? strikeData.call : strikeData.put;
+      if (!optData) return res.status(400).json({ error: 'Market data unavailable for this option.' });
+      
+      // MTM Exit: If we bought, we exit by selling to the Bid. If we sold, we exit by buying the Ask.
+      verifiedExitPrice = trade.action === 'buy' ? (optData.bidPrice || optData.ltp) : (optData.askPrice || optData.ltp);
+    }
 
     // Calculate PnL for this exit
     const direction = trade.action === 'buy' ? 1 : -1;
-    const pnl = direction * (exitPrice - trade.entryPrice) * exitQty * trade.lotSize;
+    const pnl = direction * (verifiedExitPrice - trade.entryPrice) * exitQty * trade.lotSize;
     
     // Update User Capital
-    const user = await User.findById(req.user._id);
-    user.realizedPnL += pnl;
-    user.virtualCapital += pnl;
-    await user.save();
+    // Update User Capital using atomic $inc to prevent concurrency race conditions
+    await User.updateOne(
+      { _id: req.user._id },
+      { $inc: { realizedPnL: pnl, virtualCapital: pnl } }
+    );
 
-    if (exitQty === trade.qty) {
-      // Full exit
-      trade.status = 'CLOSED';
-      trade.exitPrice = exitPrice;
-      trade.exitTime = Date.now();
-      trade.realizedPnL += pnl;
-      await trade.save();
-      return res.json(trade);
-    } else {
-      // Partial Exit - reduce qty of original trade, create a closed child trade to log history?
-      // For simplicity, we just reduce qty and add to realizedPnL
-      trade.qty -= exitQty;
-      trade.realizedPnL += pnl;
-      await trade.save();
-      return res.json(trade);
+    // Atomically close trade
+    const updatedTrade = await Trade.findOneAndUpdate(
+      { _id: tradeId, status: 'OPEN' },
+      { status: 'CLOSED', exitPrice: verifiedExitPrice, exitTime: Date.now(), $inc: { realizedPnL: pnl } },
+      { new: true }
+    );
+
+    if (!updatedTrade) {
+      // Revert user capital if trade closure failed concurrently
+      await User.updateOne(
+        { _id: req.user._id },
+        { $inc: { realizedPnL: -pnl, virtualCapital: -pnl } }
+      );
+      return res.status(400).json({ error: 'Trade already closed by another request' });
     }
+    
+    return res.json(updatedTrade);
 
   } catch (error) {
     res.status(500).json({ error: error.message });

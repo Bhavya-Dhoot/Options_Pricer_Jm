@@ -34,17 +34,19 @@ export function useLiveData() {
   const [isLive, setIsLive] = useState(false);
   const intervalRef = useRef(null);
 
-  const fetchNow = useCallback(async (symbol = 'NIFTY', { force = true, expiry = null, futExpiry = null } = {}) => {
+  const fetchNow = useCallback(async (symbol = 'NIFTY', { force = true, expiry = null, futExpiry = null, backtestTimestamp = null } = {}) => {
     setIsLoading(true);
     setError(null);
 
     try {
+      const endpoint = backtestTimestamp ? '/backtest/snapshot' : '/option-chain';
       const params = new URLSearchParams({ symbol });
-      if (force) params.set('force', 'true');
+      if (!backtestTimestamp && force) params.set('force', 'true');
       if (expiry) params.set('optExpiry', expiry);
       if (futExpiry) params.set('futExpiry', futExpiry);
+      if (backtestTimestamp) params.set('timestamp', backtestTimestamp);
 
-      const res = await fetch(`${API_BASE}/option-chain?${params}`, {
+      const res = await fetch(`${API_BASE}${endpoint}?${params}`, {
         cache: 'no-store',                    // bypass browser HTTP cache
         headers: { 'Cache-Control': 'no-cache' },
       });

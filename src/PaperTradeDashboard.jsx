@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Briefcase, Activity, Clock, LogOut } from 'lucide-react';
+import { DollarSign, Briefcase, Activity, Clock, LogOut, ArrowUpRight } from 'lucide-react';
 import LiveStrategyBuilder from './LiveStrategyBuilder.jsx';
 
 export default function PaperTradeDashboard({ user, live, onLogout }) {
@@ -9,6 +9,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
   const [isEditingCapital, setIsEditingCapital] = useState(false);
   const [newCapital, setNewCapital] = useState('');
   const [livePrices, setLivePrices] = useState({});
+  const [injectedLegs, setInjectedLegs] = useState([]);
 
   useEffect(() => {
     fetchProfileAndTrades();
@@ -21,6 +22,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     const intervalMs = profile.role === 'admin' ? 1000 : 5000;
     
     const fetchLivePrices = async () => {
+      if (document.hidden) return; // Prevent background tab memory/bandwidth leaks
       const openSymbols = [...new Set(trades.filter(t => t.status === 'OPEN').map(t => t.symbol))];
       if (openSymbols.length === 0) return;
 
@@ -97,6 +99,23 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleInjectToBuilder = (trade) => {
+    // Generate a comparative leg
+    const leg = {
+      id: `compare-${trade._id}`,
+      type: trade.type,
+      action: trade.action,
+      strike: trade.strike,
+      qty: trade.qty,
+      premium: trade.entryPrice,
+      lotSize: trade.lotSize,
+      T: trade.type === 'future' ? 0.05 : 0.05, // Default approx
+      expiry: trade.expiry,
+      isComparative: true // Special flag
+    };
+    setInjectedLegs([leg]);
   };
 
   if (loading) return <div className="p-8 text-center text-[#8b949e]">Loading portfolio...</div>;
@@ -203,7 +222,8 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
             live={live} 
             riskFreeRate={6.5} 
             isPaperTradeMode={true} 
-            onTradeExecuted={fetchProfileAndTrades} 
+            onTradeExecuted={fetchProfileAndTrades}
+            injectedLegs={injectedLegs}
           />
         </div>
       </div>
@@ -236,13 +256,23 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
                     {trade.action.toUpperCase()}
                   </span>
                 </td>
-                <td className="p-4 text-right font-mono">{trade.qty} × {trade.lotSize}</td>
+                <td className="p-4 text-right">
+                  <div className="font-mono text-[#e6edf3]">{trade.qty * trade.lotSize}</div>
+                  <div className="text-xs text-[#8b949e]">{trade.qty} Lots</div>
+                </td>
                 <td className="p-4 text-right font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</td>
                 <td className="p-4 text-right font-mono text-[#58a6ff]">₹{trade.liveLTP?.toFixed(2)}</td>
                 <td className={`p-4 text-right font-mono font-bold ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                   {trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(2)}
                 </td>
-                <td className="p-4 text-right">
+                <td className="p-4 text-right flex items-center justify-end gap-2">
+                  <button 
+                    onClick={() => handleInjectToBuilder(trade)}
+                    className="p-1 text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#58a6ff]/10 rounded transition-colors"
+                    title="Load to Strategy Builder to Compare"
+                  >
+                    <ArrowUpRight size={16} />
+                  </button>
                   <button 
                     onClick={() => handleExitTrade(trade._id, trade.qty, trade.liveLTP)} 
                     className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-semibold transition-colors"

@@ -6,84 +6,100 @@ const generateToken = (id) => {
 };
 
 export const registerUser = async (req, res) => {
-  const { username, password } = req.body;
-  
-  const userExists = await User.findOne({ username });
-  if (userExists) {
-    return res.status(400).json({ error: 'User already exists' });
-  }
-  
-  const user = await User.create({
-    username,
-    password,
-  });
-  
-  if (user) {
-    res.status(201).json({
-      _id: user._id,
-      username: user.username,
-      role: user.role,
-      virtualCapital: user.virtualCapital,
-      realizedPnL: user.realizedPnL,
-      token: generateToken(user._id)
+  try {
+    const { username, password } = req.body;
+    
+    const userExists = await User.findOne({ username });
+    if (userExists) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+    
+    const user = await User.create({
+      username,
+      password,
     });
-  } else {
-    res.status(400).json({ error: 'Invalid user data' });
+    
+    if (user) {
+      res.status(201).json({
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        virtualCapital: user.virtualCapital,
+        realizedPnL: user.realizedPnL,
+        token: generateToken(user._id)
+      });
+    } else {
+      res.status(400).json({ error: 'Invalid user data' });
+    }
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
 };
 
 export const loginUser = async (req, res) => {
-  const { username, password } = req.body;
-  
-  const user = await User.findOne({ username });
-  if (user && (await user.matchPassword(password))) {
-    res.json({
-      _id: user._id,
-      username: user.username,
-      role: user.role,
-      virtualCapital: user.virtualCapital,
-      realizedPnL: user.realizedPnL,
-      token: generateToken(user._id)
-    });
-  } else {
-    res.status(401).json({ error: 'Invalid username or password' });
+  try {
+    const { username, password } = req.body;
+    
+    const user = await User.findOne({ username });
+    if (user && (await user.matchPassword(password))) {
+      res.json({
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        virtualCapital: user.virtualCapital,
+        realizedPnL: user.realizedPnL,
+        token: generateToken(user._id)
+      });
+    } else {
+      res.status(401).json({ error: 'Invalid username or password' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };
 
 export const getUserProfile = async (req, res) => {
-  const user = await User.findById(req.user._id);
-  if (user) {
-    res.json({
-      _id: user._id,
-      username: user.username,
-      role: user.role,
-      virtualCapital: user.virtualCapital,
-      realizedPnL: user.realizedPnL
-    });
-  } else {
-    res.status(404).json({ error: 'User not found' });
+  try {
+    const user = await User.findById(req.user._id);
+    if (user) {
+      res.json({
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        virtualCapital: user.virtualCapital,
+        realizedPnL: user.realizedPnL
+      });
+    } else {
+      res.status(404).json({ error: 'User not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };
 
 export const updateCapital = async (req, res) => {
-  const { virtualCapital } = req.body;
-  if (virtualCapital === undefined || isNaN(virtualCapital)) {
-    return res.status(400).json({ error: 'Invalid capital amount' });
-  }
-  
-  const user = await User.findById(req.user._id);
-  if (user) {
-    user.virtualCapital = Number(virtualCapital);
-    await user.save();
+  try {
+    const { virtualCapital } = req.body;
+    if (virtualCapital === undefined || isNaN(virtualCapital) || virtualCapital < 1000 || virtualCapital > 1000000000) {
+      return res.status(400).json({ error: 'Invalid capital amount. Must be between 1K and 100Cr.' });
+    }
     
-    res.json({
-      _id: user._id,
-      username: user.username,
-      role: user.role,
-      virtualCapital: user.virtualCapital,
-      realizedPnL: user.realizedPnL
-    });
-  } else {
-    res.status(404).json({ error: 'User not found' });
+    const user = await User.findById(req.user._id);
+    if (user) {
+      user.virtualCapital = Number(virtualCapital);
+      await user.save();
+      
+      res.json({
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        virtualCapital: user.virtualCapital,
+        realizedPnL: user.realizedPnL
+      });
+    } else {
+      res.status(404).json({ error: 'User not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };

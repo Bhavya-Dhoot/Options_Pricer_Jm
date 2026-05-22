@@ -74,11 +74,13 @@ export function getAvailableExpiries(symbol) {
   // Angel One expiry format is usually DDMMMYYYY (e.g., "28MAY2026")
   const parseDate = (dStr) => {
     if (!dStr) return 0;
-    const day = parseInt(dStr.slice(0, 2), 10);
-    const monthStr = dStr.slice(2, 5);
-    const year = parseInt(dStr.slice(5), 10);
+    const match = dStr.match(/(\d+)([a-zA-Z]+)(\d+)/);
+    if (!match) return 0;
+    const day = parseInt(match[1], 10);
+    const monthStr = match[2].toUpperCase().substring(0, 3);
+    const year = parseInt(match[3], 10);
     const months = { JAN:0, FEB:1, MAR:2, APR:3, MAY:4, JUN:5, JUL:6, AUG:7, SEP:8, OCT:9, NOV:10, DEC:11 };
-    return new Date(year, months[monthStr], day).getTime();
+    return new Date(year, months[monthStr] || 0, day).getTime();
   };
 
   return Array.from(expiries).sort((a, b) => parseDate(a) - parseDate(b));
@@ -90,11 +92,13 @@ export function getAvailableFutureExpiries(symbol) {
   
   const parseDate = (dStr) => {
     if (!dStr) return 0;
-    const day = parseInt(dStr.slice(0, 2), 10);
-    const monthStr = dStr.slice(2, 5);
-    const year = parseInt(dStr.slice(5), 10);
+    const match = dStr.match(/(\d+)([a-zA-Z]+)(\d+)/);
+    if (!match) return 0;
+    const day = parseInt(match[1], 10);
+    const monthStr = match[2].toUpperCase().substring(0, 3);
+    const year = parseInt(match[3], 10);
     const months = { JAN:0, FEB:1, MAR:2, APR:3, MAY:4, JUN:5, JUL:6, AUG:7, SEP:8, OCT:9, NOV:10, DEC:11 };
-    return new Date(year, months[monthStr], day).getTime();
+    return new Date(year, months[monthStr] || 0, day).getTime();
   };
 
   return Array.from(expiries).sort((a, b) => parseDate(a) - parseDate(b));

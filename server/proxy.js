@@ -19,6 +19,7 @@ import { startPriceCacheLoop } from './src/application/priceCache.js';
 import authRouter from './src/presentation/authRouter.js';
 import tradeRouter from './src/presentation/tradeRouter.js';
 import strategyRouter from './src/presentation/strategyRouter.js';
+import backtestRouter from './src/presentation/backtestRouter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +38,7 @@ connectDB().then(() => {
 app.use('/api/auth', authRouter);
 app.use('/api/trades', tradeRouter);
 app.use('/api/strategies', strategyRouter);
+app.use('/api/backtest', backtestRouter);
 
 // Serve static frontend from 'dist' directory in production
 app.use(express.static(path.join(__dirname, '../dist')));

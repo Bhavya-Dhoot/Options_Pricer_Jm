@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { RefreshCw, Play, Settings, AlertTriangle, TrendingUp, Save, FolderOpen, BarChart2 } from 'lucide-react';
+import { RefreshCw, Play, Settings, AlertTriangle, TrendingUp, Save, FolderOpen, BarChart2, Clock } from 'lucide-react';
 import LiveFetchBar from './components/LiveFetchBar.jsx';
 import LiveLegConfigurator from './components/strategies/LiveLegConfigurator.jsx';
 import PayoffChart from './components/strategies/PayoffChart.jsx';
@@ -31,10 +31,48 @@ function calculateDTE(expiryStr) {
   }
 }
 
-export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperTradeMode = false, onTradeExecuted }) {
+export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperTradeMode = false, onTradeExecuted, injectedLegs }) {
   const [legs, setLegs] = useState([]);
+  
+  // Inject read-only comparative legs from PaperTradeDashboard
+  useEffect(() => {
+    if (injectedLegs && injectedLegs.length > 0) {
+      setLegs(prev => {
+        // Filter out previously injected comparative legs to prevent duplicates
+        const userLegs = prev.filter(l => !l.isComparative);
+        return [...injectedLegs, ...userLegs];
+      });
+    }
+  }, [injectedLegs]);
   const [targetExpiry, setTargetExpiry] = useState('');
   const [targetFutExpiry, setTargetFutExpiry] = useState('');
+
+  // Backtest Mode State
+  const [isBacktestMode, setIsBacktestMode] = useState(false);
+  const [backtestTimestamps, setBacktestTimestamps] = useState([]);
+  const [selectedTimestamp, setSelectedTimestamp] = useState('');
+
+  // Fetch backtest timestamps when toggled on
+  useEffect(() => {
+    if (isBacktestMode) {
+      const sym = live.data?.symbol || 'NIFTY';
+      fetch(`/api/backtest/timestamps?symbol=${sym}`)
+        .then(res => res.json())
+        .then(data => {
+          setBacktestTimestamps(data);
+          if (data.length > 0 && !selectedTimestamp) setSelectedTimestamp(data[0]);
+        })
+        .catch(console.error);
+    }
+  }, [isBacktestMode, live.data?.symbol]);
+
+  // Fetch snapshot when timestamp changes
+  useEffect(() => {
+    if (isBacktestMode && selectedTimestamp) {
+      live.fetchNow(live.data?.symbol || 'NIFTY', { backtestTimestamp: selectedTimestamp });
+    }
+  }, [isBacktestMode, selectedTimestamp]);
+
   
   // Custom hook to fetch expiries
   const { optExpiries = [], futExpiries = [] } = useAvailableExpiries(live.data?.symbol || 'NIFTY') || {};
@@ -129,11 +167,19 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
 
   const handleFetch = async (symbol) => {
     // When they click fetch, fetch the specific expiry
-    await live.fetchNow(symbol, { 
-      force: true, 
-      expiry: targetExpiry || null,
-      futExpiry: targetFutExpiry || null
-    });
+    if (isBacktestMode && selectedTimestamp) {
+      await live.fetchNow(symbol, {
+        backtestTimestamp: selectedTimestamp,
+        expiry: targetExpiry || null,
+        futExpiry: targetFutExpiry || null
+      });
+    } else {
+      await live.fetchNow(symbol, { 
+        force: true, 
+        expiry: targetExpiry || null,
+        futExpiry: targetFutExpiry || null
+      });
+    }
   };
 
   const handleExpiryChange = (e) => {
@@ -267,30 +313,44 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
     }
 
     try {
-      for (const leg of legs) {
-        await fetch('/api/trades', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            symbol: live.data?.symbol || 'NIFTY',
-            type: leg.type,
-            strike: leg.strike,
-            expiry: leg.type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : (leg.expiry || targetExpiry || live.data?.expiryDates?.[0]),
-            action: leg.action,
-            orderType: 'market',
-            qty: leg.qty,
-            lotSize: leg.lotSize || 25,
-            entryPrice: leg.premium
-          })
-        });
+      const legsToExecute = legs.filter(leg => !leg.isComparative);
+      
+      if (legsToExecute.length === 0) {
+        alert('No valid new legs to execute. Comparative legs cannot be traded again.');
+        return;
       }
+
+      const formattedLegs = legsToExecute.map(leg => ({
+        symbol: live.data?.symbol || 'NIFTY',
+        type: leg.type,
+        strike: leg.strike,
+        expiry: leg.type === 'future' ? (leg.expiry || targetFutExpiry || futExpiries?.[0]) : (leg.expiry || targetExpiry || live.data?.expiryDates?.[0]),
+        action: leg.action,
+        orderType: 'market',
+        qty: leg.qty,
+        lotSize: leg.lotSize || 25,
+        entryPrice: leg.premium
+      }));
+
+      const res = await fetch('/api/trades/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ legs: formattedLegs })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Batch trade execution failed');
+      }
+
       alert('Strategy successfully executed in Paper Trading Portfolio!');
+      setLegs([]); // Clear the builder after execution
       if (onTradeExecuted) onTradeExecuted();
     } catch (err) {
-      alert('Failed to place paper trade. Check your connection.');
+      alert(err.message || 'Failed to place paper trade. Check your connection.');
     }
   };
 
@@ -358,7 +418,36 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
         <LiveFetchBar onFetch={handleFetch} isLoading={live.isLoading} error={live.error} />
         
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-wrap">
+          <div className="flex flex-col gap-2 min-w-[160px] bg-[#161b22] border border-[#30363d] p-2 rounded-xl">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={isBacktestMode} 
+                onChange={(e) => {
+                  setIsBacktestMode(e.target.checked);
+                  if (!e.target.checked) live.fetchNow(live.data?.symbol || 'NIFTY', { force: true });
+                }} 
+                className="rounded bg-[#0d1117] border-[#30363d] text-blue-500 focus:ring-blue-500" 
+              />
+              <span className="text-[10px] text-[#58a6ff] uppercase font-bold tracking-wider flex items-center gap-1">
+                <Clock size={12} /> Backtest Engine
+              </span>
+            </label>
+            {isBacktestMode && (
+              <select 
+                value={selectedTimestamp}
+                onChange={(e) => setSelectedTimestamp(e.target.value)}
+                className="bg-[#0d1117] border border-[#30363d] text-[#e6edf3] text-sm rounded-lg px-2 py-1 outline-none"
+              >
+                <option value="" disabled>Select Time...</option>
+                {backtestTimestamps.map(ts => (
+                  <option key={ts} value={ts}>{new Date(ts).toLocaleTimeString()}</option>
+                ))}
+              </select>
+            )}
+          </div>
+
           <div className="flex flex-col gap-2 min-w-[160px]">
             <label className="text-[10px] text-[#8b949e] uppercase font-bold tracking-wider">Target Options Expiry</label>
             <select 
@@ -404,7 +493,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
       {/* Metrics Bar */}
       <div className="flex flex-col lg:flex-row gap-4 items-center">
         <div className="flex-1 w-full">
-          <StrategyMetricsBar legs={legs} globalInputs={globalInputs} />
+          <StrategyMetricsBar legs={legs} globalInputs={globalInputs} marginRequired={estimatedMargin} />
         </div>
         {isPaperTradeMode && (
           <div className="flex gap-2 w-full lg:w-auto mt-4 lg:mt-0">

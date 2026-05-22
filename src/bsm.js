@@ -64,6 +64,9 @@ export function calculateBSM(S, K, T, r, sigma, optionType, q = 0) {
   if (T <= 0 && optionType !== 'UNDERLYING') {
     T = 1e-5; // Protective epsilon to prevent divide-by-zero
   }
+  if (sigma <= 0) {
+    sigma = 1e-5; // Prevent divide-by-zero on volatility drops
+  }
 
   if (optionType === 'UNDERLYING') {
     return {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { STRATEGIES } from './strategyDefinitions.js';
 import { premiumAt, calculateBSM } from './bsm.js';
 import { findATMStrike } from './useLiveData.js';
+import { estimateMargin } from './utils/marginCalculator.js';
 
 import LiveFetchBar from './components/LiveFetchBar.jsx';
 import StrategyCatalog from './components/strategies/StrategyCatalog.jsx';
@@ -226,7 +227,11 @@ export default function OptionsStrategies({ liveSpot, liveIV, riskFreeRate }) {
 
             {/* Main Content Area */}
             <div className="xl:col-span-3 space-y-6">
-              <StrategyMetricsBar legs={legs} globalInputs={globalInputs} />
+              <StrategyMetricsBar 
+                legs={legs} 
+                globalInputs={globalInputs} 
+                marginRequired={useMemo(() => estimateMargin(legs, globalInputs.spot, 'NIFTY'), [legs, globalInputs.spot])}
+              />
               
               <div className="card p-4">
                 <LegConfigurator 

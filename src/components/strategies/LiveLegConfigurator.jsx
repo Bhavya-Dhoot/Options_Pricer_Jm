@@ -26,24 +26,26 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
             <th className="pb-2 font-medium w-8"></th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-[#30363d]/50">
+        <tbody className="divide-y divide-[#30363d]">
           {legs.map((leg, idx) => (
-            <tr key={leg.id} className="text-xs">
+            <tr key={leg.id} className={`transition-colors hover:bg-[#161b22]/50 ${leg.isComparative ? 'opacity-70 bg-purple-900/10' : ''}`}>
               <td className="py-2.5 text-[#8b949e]">{idx + 1}</td>
               <td className="py-2.5">
                 <div className="flex gap-1">
                   <select 
                     value={leg.action} 
+                    disabled={leg.isComparative}
                     onChange={e => onUpdateLeg(leg.id, { action: e.target.value })}
-                    className={`bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold focus:outline-none min-w-[50px] ${getBadgeColor(leg.type, leg.action)}`}
+                    className={`bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold focus:outline-none min-w-[50px] ${getBadgeColor(leg.type, leg.action)} disabled:opacity-50`}
                   >
                     <option value="buy">Buy</option>
                     <option value="sell">Sell</option>
                   </select>
                   <select 
                     value={leg.type} 
+                    disabled={leg.isComparative}
                     onChange={e => onUpdateLeg(leg.id, { type: e.target.value })}
-                    className="bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold text-[#e6edf3] focus:outline-none min-w-[70px]"
+                    className="bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold text-[#e6edf3] focus:outline-none min-w-[70px] disabled:opacity-50"
                   >
                     <option value="call">Call</option>
                     <option value="put">Put</option>
@@ -56,12 +58,13 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                   <div className="flex flex-col gap-1 w-44">
                     <select
                       value={leg.expiry || ''}
+                      disabled={leg.isComparative}
                       onChange={e => {
                         const newExp = e.target.value;
                         if (fetchExpiry) fetchExpiry(newExp, true);
                         onUpdateLeg(leg.id, { expiry: newExp });
                       }}
-                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] text-[10px] uppercase focus:border-[#58a6ff] focus:outline-none"
+                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] text-[10px] uppercase focus:border-[#58a6ff] focus:outline-none disabled:opacity-50"
                     >
                       <option value="" disabled hidden>Select Expiry</option>
                       {futExpiryDates.map(exp => (
@@ -76,12 +79,13 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                   <div className="flex flex-col gap-1 w-44">
                     <select
                       value={leg.expiry || ''}
+                      disabled={leg.isComparative}
                       onChange={e => {
                         const newExp = e.target.value;
                         if (fetchExpiry) fetchExpiry(newExp);
                         onUpdateLeg(leg.id, { expiry: newExp });
                       }}
-                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] text-[10px] uppercase focus:border-[#58a6ff] focus:outline-none"
+                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] text-[10px] uppercase focus:border-[#58a6ff] focus:outline-none disabled:opacity-50"
                     >
                       <option value="" disabled hidden>Select Expiry</option>
                       {expiryDates.map(exp => (
@@ -91,8 +95,9 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                     
                     <select
                       value={leg.strike}
+                      disabled={leg.isComparative}
                       onChange={e => onUpdateLeg(leg.id, { strike: Number(e.target.value) })}
-                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] font-mono focus:border-[#58a6ff] focus:outline-none"
+                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] font-mono focus:border-[#58a6ff] focus:outline-none disabled:opacity-50"
                     >
                       <option value={leg.strike} disabled hidden>{leg.strike}</option>
                       {leg.expiry && byExpiry[leg.expiry] ? (
@@ -116,13 +121,22 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                 )}
               </td>
               <td className="py-2.5">
-                <input 
-                  type="number" 
-                  min="1" max="1000"
-                  value={leg.qty} 
-                  onChange={e => onUpdateLeg(leg.id, { qty: Number(e.target.value) })}
-                  className="w-16 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] font-mono focus:border-[#58a6ff] focus:outline-none"
-                />
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1">
+                    <input 
+                      type="number" 
+                      min="1" max="1000"
+                      value={leg.qty} 
+                      disabled={leg.isComparative}
+                      onChange={e => onUpdateLeg(leg.id, { qty: Number(e.target.value) })}
+                      className="w-16 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] font-mono focus:border-[#58a6ff] focus:outline-none disabled:opacity-50"
+                    />
+                    <span className="text-xs text-[#8b949e]">Lots</span>
+                  </div>
+                  <span className="text-[10px] text-[#58a6ff] font-mono font-semibold">
+                    Qty: {leg.qty * (leg.lotSize || 25)}
+                  </span>
+                </div>
               </td>
               <td className="py-2.5">
                 <div className="flex items-center gap-1">
@@ -131,8 +145,9 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                     type="number" 
                     step="0.05"
                     value={leg.premium} 
+                    disabled={leg.isComparative}
                     onChange={e => onUpdateLeg(leg.id, { premium: Number(e.target.value) })}
-                    className="w-24 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e3b341] font-mono focus:border-[#e3b341] focus:outline-none"
+                    className="w-24 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e3b341] font-mono focus:border-[#e3b341] focus:outline-none disabled:opacity-50"
                     placeholder="LTP"
                   />
                 </div>
@@ -147,12 +162,14 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                 </span>
               </td>
               <td className="py-2.5 text-right">
-                <button 
-                  onClick={() => onRemoveLeg(leg.id)}
-                  className="p-1.5 text-[#8b949e] hover:text-[#f85149] hover:bg-[#f85149]/10 rounded transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {!leg.isComparative && (
+                  <button 
+                    onClick={() => onRemoveLeg(leg.id)}
+                    className="p-1.5 text-[#8b949e] hover:text-[#f85149] hover:bg-[#f85149]/10 rounded transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </td>
             </tr>
           ))}

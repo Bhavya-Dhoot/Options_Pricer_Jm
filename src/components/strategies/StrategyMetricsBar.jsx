@@ -25,7 +25,7 @@ function MetricBox({ label, value, isPositive, subtext, infiniteStyle }) {
   );
 }
 
-export default function StrategyMetricsBar({ legs, globalInputs }) {
+export default function StrategyMetricsBar({ legs, globalInputs, marginRequired }) {
   const metrics = useMemo(() => {
     if (!legs || legs.length === 0) return null;
     
@@ -64,8 +64,20 @@ export default function StrategyMetricsBar({ legs, globalInputs }) {
       legs, globalInputs.spot, Math.max(...legs.map(l => l.T)), 
       globalInputs.rate, globalInputs.dividend, globalInputs.iv
     );
+    
+    // Calculate range width
+    let rangeWidth = null;
+    let rangeText = 'None';
+    if (breakevens.length > 0) {
+      if (breakevens.length === 2) {
+        rangeWidth = Math.abs(breakevens[1] - breakevens[0]);
+        rangeText = `${Math.min(...breakevens).toFixed(0)} - ${Math.max(...breakevens).toFixed(0)} (${rangeWidth.toFixed(0)} pts)`;
+      } else {
+        rangeText = breakevens.map(b => Math.round(b)).join(' & ');
+      }
+    }
 
-    return { netPremium, netDelta, netTheta, netVega, maxProfit, maxLoss, breakevens, pop };
+    return { netPremium, netDelta, netTheta, netVega, maxProfit, maxLoss, breakevens, pop, rangeText };
   }, [legs, globalInputs]);
 
   if (!metrics) return null;
@@ -96,9 +108,16 @@ export default function StrategyMetricsBar({ legs, globalInputs }) {
         isPositive={metrics.pop > 0.5}
       />
       <MetricBox 
-        label="Breakevens" 
-        value={metrics.breakevens.length > 0 ? metrics.breakevens.map(b => Math.round(b)).join(' & ') : 'None'} 
+        label="Range Level" 
+        value={metrics.rangeText} 
       />
+      {marginRequired !== undefined && (
+        <MetricBox 
+          label="Risk Cover (Margin)" 
+          value={fmt(marginRequired)} 
+          isPositive={false}
+        />
+      )}
       <MetricBox 
         label="Net Delta" 
         value={metrics.netDelta.toFixed(2)} 

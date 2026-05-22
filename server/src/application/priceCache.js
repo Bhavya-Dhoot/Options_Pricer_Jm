@@ -1,19 +1,24 @@
 import { smartApiRequest } from '../../angelOneAuth.js';
 import { getFutureToken, getOptionTokens, getUnderlyingToken } from '../../scripMaster.js';
+import { MarketSnapshot } from '../domain/MarketSnapshot.js';
 
 // Global cache
 // { "NIFTY": { spot: 24500, iv: 0.15, optionChain: [...], futures: {...}, timestamp: 123456 } }
 const priceCache = {};
 const activeSymbols = new Set();
 const prioritySymbols = new Set();
+const lastSnapshotTime = {};
+const lastRequestTime = {}; // For garbage collection
 let isFetching = false;
 
 // Register symbols that users have in their portfolios
 export const registerSymbol = (symbol, isPriority = false) => {
+  const sym = symbol.toUpperCase();
+  lastRequestTime[sym] = Date.now();
   if (isPriority) {
-    prioritySymbols.add(symbol.toUpperCase());
+    prioritySymbols.add(sym);
   } else {
-    activeSymbols.add(symbol.toUpperCase());
+    activeSymbols.add(sym);
   }
 };
 
@@ -34,8 +39,18 @@ export const startPriceCacheLoop = () => {
   
   const fetchLoop = async () => {
     try {
+      const now = Date.now();
+      // Garbage Collection: Remove symbols not requested in the last 10 minutes
+      for (const sym of activeSymbols) {
+        if (now - (lastRequestTime[sym] || 0) > 600000) activeSymbols.delete(sym);
+      }
+      for (const sym of prioritySymbols) {
+        if (now - (lastRequestTime[sym] || 0) > 600000) prioritySymbols.delete(sym);
+      }
+
       const pQueue = Array.from(prioritySymbols);
-      const rQueue = Array.from(activeSymbols);
+      // Filter out priority symbols from regular active symbols to prevent duplicate polling
+      const rQueue = Array.from(activeSymbols).filter(sym => !prioritySymbols.has(sym));
       
       let targetSymbol = null;
       reqCount++;
@@ -69,6 +84,17 @@ export const startPriceCacheLoop = () => {
             data: data,
             timestamp: Date.now()
           };
+          
+          // Save snapshot to DB if 60 seconds have passed for this symbol
+          const now = Date.now();
+          if (!lastSnapshotTime[targetSymbol] || now - lastSnapshotTime[targetSymbol] >= 60000) {
+            lastSnapshotTime[targetSymbol] = now;
+            MarketSnapshot.create({
+              symbol: targetSymbol,
+              timestamp: new Date(now),
+              data: data
+            }).catch(e => console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message));
+          }
         }
       }
     } catch (err) {
