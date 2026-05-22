@@ -72,7 +72,7 @@ export default function App() {
         {!user ? (
           <AuthPage onLogin={(userData) => setUser(userData)} />
         ) : (
-          <PaperTradeDashboard user={user} onLogout={() => { localStorage.removeItem('auth_token'); setUser(null); }} />
+          <PaperTradeDashboard user={user} live={live} onLogout={() => { localStorage.removeItem('auth_token'); setUser(null); }} />
         )}
       </div>
     </div>

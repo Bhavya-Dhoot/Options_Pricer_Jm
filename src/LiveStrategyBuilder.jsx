@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { RefreshCw, Play, Settings, AlertTriangle, TrendingUp, Save, FolderOpen, BarChart2 } from 'lucide-react';
 import LiveFetchBar from './components/LiveFetchBar.jsx';
 import LiveLegConfigurator from './components/strategies/LiveLegConfigurator.jsx';
 import PayoffChart from './components/strategies/PayoffChart.jsx';
@@ -10,6 +11,7 @@ import ScenarioHeatmap from './components/strategies/ScenarioHeatmap.jsx';
 import { estimateMargin } from './utils/marginCalculator.js';
 import { useAvailableExpiries } from './useLiveData.js';
 import { AlertCircle } from 'lucide-react';
+import StrategyTemplates from './components/strategies/StrategyTemplates.jsx';
 
 function calculateDTE(expiryStr) {
   if (!expiryStr) return 30;
@@ -29,13 +31,33 @@ function calculateDTE(expiryStr) {
   }
 }
 
-export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
+export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperTradeMode = false, onTradeExecuted }) {
   const [legs, setLegs] = useState([]);
   const [targetExpiry, setTargetExpiry] = useState('');
   const [targetFutExpiry, setTargetFutExpiry] = useState('');
   
   // Custom hook to fetch expiries
   const { optExpiries = [], futExpiries = [] } = useAvailableExpiries(live.data?.symbol || 'NIFTY') || {};
+  // ----- Modals & Loaders -----
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saveDesc, setSaveDesc] = useState('');
+  const [savedStrategies, setSavedStrategies] = useState([]);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+
+  useEffect(() => {
+    // Only load if logged in
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      fetch('/api/strategies', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) setSavedStrategies(data);
+        })
+        .catch(() => {});
+    }
+  }, []);
+
   const isExpiriesLoading = optExpiries.length === 0;
 
   const globalInputs = useMemo(() => {
@@ -266,9 +288,63 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
         });
       }
       alert('Strategy successfully executed in Paper Trading Portfolio!');
+      if (onTradeExecuted) onTradeExecuted();
     } catch (err) {
       alert('Failed to place paper trade. Check your connection.');
     }
+  };
+
+  const handleSaveStrategy = async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      alert('You must be logged in to save strategies.');
+      return;
+    }
+    if (!saveName) return alert('Name is required');
+
+    try {
+      const res = await fetch('/api/strategies', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: saveName,
+          description: saveDesc,
+          legs: legs.map(l => ({
+            type: l.type,
+            strike: l.strike,
+            action: l.action,
+            qty: l.qty,
+            expiry: l.type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : (l.expiry || targetExpiry || live.data?.expiryDates?.[0]),
+            lotSize: l.lotSize
+          }))
+        })
+      });
+      if (res.ok) {
+        const strat = await res.json();
+        setSavedStrategies(prev => [strat, ...prev]);
+        setShowSaveModal(false);
+        setSaveName('');
+        setSaveDesc('');
+        alert('Strategy saved successfully!');
+      }
+    } catch (err) {
+      alert('Failed to save strategy.');
+    }
+  };
+
+  const loadStrategy = (strat) => {
+    const loadedLegs = strat.legs.map((l, idx) => ({
+      ...l,
+      id: `loaded-${Date.now()}-${idx}`,
+      premium: live.data?.spot || 0, // Gets auto-updated by premium binding if prices change
+      iv: 0.15,
+      T: l.expiry ? calculateDTE(l.expiry) / 365 : 0
+    }));
+    setLegs(loadedLegs);
+    setShowLoadModal(false);
   };
 
   const estimatedMargin = useMemo(() => {
@@ -330,13 +406,98 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
         <div className="flex-1 w-full">
           <StrategyMetricsBar legs={legs} globalInputs={globalInputs} />
         </div>
-        <button 
-          onClick={handlePaperTrade}
-          className="w-full lg:w-auto px-6 py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-        >
-          <BarChart2 size={18} /> Send to Paper Trade
-        </button>
+        {isPaperTradeMode && (
+          <div className="flex gap-2 w-full lg:w-auto mt-4 lg:mt-0">
+            <button 
+              onClick={() => setShowLoadModal(true)}
+              className="flex-1 lg:flex-none px-4 py-4 bg-[#1f2937] hover:bg-[#374151] text-[#e6edf3] font-bold rounded-xl border border-[#30363d] transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              <FolderOpen size={18} /> Load
+            </button>
+            <button 
+              onClick={() => setShowSaveModal(true)}
+              className="flex-1 lg:flex-none px-4 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              <Save size={18} /> Save
+            </button>
+            <button 
+              onClick={handlePaperTrade}
+              className="flex-1 lg:flex-none px-4 py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              <BarChart2 size={18} /> Execute
+            </button>
+          </div>
+        )}
       </div>
+
+      {isPaperTradeMode && (
+        <StrategyTemplates 
+          spotPrice={live.data?.spot} 
+          symbol={live.data?.symbol}
+          onApply={(newLegs) => {
+            const appliedLegs = newLegs.map((l, idx) => ({
+              ...l,
+              id: `tpl-${Date.now()}-${idx}`,
+              qty: 1,
+              lotSize: getLotSize(live.data?.symbol),
+              expiry: targetExpiry || live.data?.expiryDates?.[0],
+              premium: live.data?.spot || 0 // auto-updates from useEffect binding
+            }));
+            setLegs(appliedLegs);
+          }} 
+        />
+      )}
+
+      {/* Save Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-xl w-[400px]">
+            <h3 className="text-xl font-bold text-white mb-4">Save Strategy</h3>
+            <input 
+              className="w-full bg-[#0d1117] border border-[#30363d] text-white p-2 rounded mb-3" 
+              placeholder="Strategy Name (e.g. Iron Condor)" 
+              value={saveName} onChange={e => setSaveName(e.target.value)} 
+            />
+            <textarea 
+              className="w-full bg-[#0d1117] border border-[#30363d] text-white p-2 rounded mb-4 text-sm" 
+              placeholder="Description / Tags" 
+              rows={3}
+              value={saveDesc} onChange={e => setSaveDesc(e.target.value)} 
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowSaveModal(false)} className="px-4 py-2 bg-gray-600 rounded text-white">Cancel</button>
+              <button onClick={handleSaveStrategy} className="px-4 py-2 bg-blue-600 rounded text-white">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Modal */}
+      {showLoadModal && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-white">Load Strategy Template</h3>
+              <button onClick={() => setShowLoadModal(false)} className="text-gray-400 hover:text-white">✕</button>
+            </div>
+            {savedStrategies.length === 0 ? (
+              <p className="text-gray-400">No saved strategies found.</p>
+            ) : (
+              <div className="space-y-3">
+                {savedStrategies.map(strat => (
+                  <div key={strat._id} className="p-4 border border-[#30363d] bg-[#0d1117] rounded hover:border-blue-500 cursor-pointer flex justify-between items-center" onClick={() => loadStrategy(strat)}>
+                    <div>
+                      <div className="font-bold text-blue-400">{strat.name}</div>
+                      <div className="text-xs text-gray-400 mt-1">{strat.description}</div>
+                    </div>
+                    <div className="text-xs text-gray-500">{new Date(strat.createdAt).toLocaleDateString()}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Full Width Layout */}
       <div className="space-y-6">

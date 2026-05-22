@@ -14,8 +14,11 @@ import {
 } from './scripMaster.js';
 import { solveImpliedIV } from '../src/bsm.js';
 import { connectDB } from './src/infrastructure/db.js';
+import { seedSuperUser } from './src/application/seed.js';
+import { startPriceCacheLoop } from './src/application/priceCache.js';
 import authRouter from './src/presentation/authRouter.js';
 import tradeRouter from './src/presentation/tradeRouter.js';
+import strategyRouter from './src/presentation/strategyRouter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,10 +29,14 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-connectDB();
+connectDB().then(() => {
+  seedSuperUser();
+  startPriceCacheLoop();
+});
 
 app.use('/api/auth', authRouter);
 app.use('/api/trades', tradeRouter);
+app.use('/api/strategies', strategyRouter);
 
 // Serve static frontend from 'dist' directory in production
 app.use(express.static(path.join(__dirname, '../dist')));

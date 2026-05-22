@@ -1,14 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { DollarSign, Briefcase, Activity, Clock, LogOut } from 'lucide-react';
+import LiveStrategyBuilder from './LiveStrategyBuilder.jsx';
 
-export default function PaperTradeDashboard({ user, onLogout }) {
+export default function PaperTradeDashboard({ user, live, onLogout }) {
   const [profile, setProfile] = useState(user);
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isEditingCapital, setIsEditingCapital] = useState(false);
+  const [newCapital, setNewCapital] = useState('');
+  const [livePrices, setLivePrices] = useState({});
 
   useEffect(() => {
     fetchProfileAndTrades();
   }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    
+    // Tiered polling: 1s for 'admin', 5s for 'user'
+    const intervalMs = profile.role === 'admin' ? 1000 : 5000;
+    
+    const fetchLivePrices = async () => {
+      const openSymbols = [...new Set(trades.filter(t => t.status === 'OPEN').map(t => t.symbol))];
+      if (openSymbols.length === 0) return;
+
+      try {
+        const token = localStorage.getItem('auth_token');
+        const priorityParam = profile.role === 'admin' ? '&priority=true' : '';
+        const res = await fetch(`/api/trades/live-prices?symbols=${openSymbols.join(',')}${priorityParam}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) setLivePrices(await res.json());
+      } catch (err) {}
+    };
+
+    const interval = setInterval(fetchLivePrices, intervalMs);
+    fetchLivePrices(); // initial fetch
+
+    return () => clearInterval(interval);
+  }, [profile, trades]);
 
   const fetchProfileAndTrades = async () => {
     try {
@@ -48,17 +78,67 @@ export default function PaperTradeDashboard({ user, onLogout }) {
     }
   };
 
+  const handleUpdateCapital = async () => {
+    if (!newCapital || isNaN(newCapital)) return;
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('/api/auth/capital', {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ virtualCapital: Number(newCapital) })
+      });
+      if (res.ok) {
+        setProfile(await res.json());
+        setIsEditingCapital(false);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (loading) return <div className="p-8 text-center text-[#8b949e]">Loading portfolio...</div>;
 
   const openTrades = trades.filter(t => t.status === 'OPEN');
   const closedTrades = trades.filter(t => t.status === 'CLOSED');
+
+  // Calculate real-time Unrealized PnL mathematically
+  let totalUnrealizedPnL = 0;
+  
+  const getLivePriceForTrade = (trade) => {
+    const data = livePrices[trade.symbol];
+    if (!data) return trade.entryPrice;
+
+    if (trade.type === 'future') {
+      return data.futurePrices?.[trade.expiry] || data.spot || trade.entryPrice;
+    } else {
+      const chain = data.byExpiry?.[trade.expiry];
+      if (!chain) return trade.entryPrice;
+      const strikeData = chain.find(s => (s.strikePrice || s.strike) === trade.strike);
+      if (!strikeData) return trade.entryPrice;
+      const optData = trade.type === 'call' ? strikeData.call : strikeData.put;
+      if (!optData) return trade.entryPrice;
+      // Mark-to-market uses the opposite side to close
+      return trade.action === 'buy' ? (optData.bidPrice || optData.ltp) : (optData.askPrice || optData.ltp);
+    }
+  };
+
+  const augmentedOpenTrades = openTrades.map(trade => {
+    const liveLTP = getLivePriceForTrade(trade);
+    const direction = trade.action === 'buy' ? 1 : -1;
+    const pnl = direction * (liveLTP - trade.entryPrice) * trade.qty * trade.lotSize;
+    totalUnrealizedPnL += pnl;
+    return { ...trade, liveLTP, pnl };
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-[#e6edf3]">Paper Trading Portfolio</h2>
-          <p className="text-sm text-[#8b949e]">{profile.email}</p>
+          <p className="text-sm text-[#8b949e]">{profile.username}</p>
         </div>
         <button onClick={onLogout} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors border border-red-500/20">
           <LogOut size={16} /> Logout
@@ -66,20 +146,45 @@ export default function PaperTradeDashboard({ user, onLogout }) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="card p-5">
+        <div className="card p-5 relative group">
           <div className="flex items-center gap-2 mb-2">
             <DollarSign size={18} className="text-blue-400" />
             <span className="text-xs font-semibold text-[#8b949e] uppercase">Virtual Capital</span>
           </div>
-          <div className="text-2xl font-mono font-bold text-[#e6edf3]">₹{profile.virtualCapital.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+          {isEditingCapital ? (
+            <div className="flex gap-2 mt-1">
+              <input 
+                type="number"
+                value={newCapital}
+                onChange={e => setNewCapital(e.target.value)}
+                className="bg-[#0d1117] border border-[#30363d] text-[#e6edf3] text-sm rounded px-2 w-full"
+                placeholder="Enter new capital"
+              />
+              <button onClick={handleUpdateCapital} className="bg-blue-500 text-white text-xs px-2 py-1 rounded">Save</button>
+              <button onClick={() => setIsEditingCapital(false)} className="bg-gray-600 text-white text-xs px-2 py-1 rounded">Cancel</button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div className="text-2xl font-mono font-bold text-[#e6edf3]">₹{profile.virtualCapital.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+              <button onClick={() => { setNewCapital(profile.virtualCapital); setIsEditingCapital(true); }} className="opacity-0 group-hover:opacity-100 text-[#8b949e] hover:text-white transition-opacity text-xs underline">Edit</button>
+            </div>
+          )}
         </div>
         <div className="card p-5">
-          <div className="flex items-center gap-2 mb-2">
-            <Activity size={18} className={profile.realizedPnL >= 0 ? "text-green-400" : "text-red-400"} />
-            <span className="text-xs font-semibold text-[#8b949e] uppercase">Realized P&L</span>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Activity size={18} className={profile.realizedPnL >= 0 ? "text-green-400" : "text-red-400"} />
+              <span className="text-xs font-semibold text-[#8b949e] uppercase">Realized P&L</span>
+            </div>
+            <div className={`text-2xl font-mono font-bold ${profile.realizedPnL >= 0 ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
+              {profile.realizedPnL >= 0 ? '+' : ''}₹{profile.realizedPnL.toLocaleString(undefined, {minimumFractionDigits: 2})}
+            </div>
           </div>
-          <div className={`text-2xl font-mono font-bold ${profile.realizedPnL >= 0 ? 'text-[#3fb950]' : 'text-[#f85149]'}`}>
-            {profile.realizedPnL >= 0 ? '+' : ''}₹{profile.realizedPnL.toLocaleString(undefined, {minimumFractionDigits: 2})}
+          <div className="flex items-center justify-between border-t border-[#30363d] pt-2 mt-2">
+            <div className="text-xs font-semibold text-[#8b949e] uppercase">Unrealized MTM</div>
+            <div className={`text-lg font-mono font-bold ${totalUnrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {totalUnrealizedPnL >= 0 ? '+' : ''}₹{totalUnrealizedPnL.toLocaleString(undefined, {minimumFractionDigits: 2})}
+            </div>
           </div>
         </div>
         <div className="card p-5">
@@ -91,6 +196,18 @@ export default function PaperTradeDashboard({ user, onLogout }) {
         </div>
       </div>
 
+      <div className="mb-8">
+        <h3 className="text-lg font-semibold text-[#e6edf3] mb-4">Strategy Terminal</h3>
+        <div className="bg-[#161b22] border border-[#30363d] rounded-xl overflow-hidden shadow-2xl">
+          <LiveStrategyBuilder 
+            live={live} 
+            riskFreeRate={6.5} 
+            isPaperTradeMode={true} 
+            onTradeExecuted={fetchProfileAndTrades} 
+          />
+        </div>
+      </div>
+
       <h3 className="text-lg font-semibold text-[#e6edf3] mb-4">Active Positions</h3>
       <div className="card overflow-hidden mb-8">
         <table className="w-full text-left text-sm">
@@ -99,14 +216,16 @@ export default function PaperTradeDashboard({ user, onLogout }) {
               <th className="p-4 text-[#8b949e] font-semibold">Symbol</th>
               <th className="p-4 text-[#8b949e] font-semibold">Action</th>
               <th className="p-4 text-[#8b949e] font-semibold text-right">Qty</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Entry</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">Avg Entry</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">LTP</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">P&L</th>
               <th className="p-4 text-[#8b949e] font-semibold text-right">Manage</th>
             </tr>
           </thead>
           <tbody>
-            {openTrades.length === 0 ? (
-              <tr><td colSpan="5" className="p-4 text-center text-[#8b949e]">No open positions. Use the Strategy Builder to place a trade.</td></tr>
-            ) : openTrades.map(trade => (
+            {augmentedOpenTrades.length === 0 ? (
+              <tr><td colSpan="7" className="p-4 text-center text-[#8b949e]">No open positions. Use the Strategy Builder to place a trade.</td></tr>
+            ) : augmentedOpenTrades.map(trade => (
               <tr key={trade._id} className="border-b border-[#30363d]/50 hover:bg-[#161b22]/50 transition-colors">
                 <td className="p-4">
                   <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
@@ -118,13 +237,17 @@ export default function PaperTradeDashboard({ user, onLogout }) {
                   </span>
                 </td>
                 <td className="p-4 text-right font-mono">{trade.qty} × {trade.lotSize}</td>
-                <td className="p-4 text-right font-mono">₹{trade.entryPrice?.toFixed(2)}</td>
+                <td className="p-4 text-right font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</td>
+                <td className="p-4 text-right font-mono text-[#58a6ff]">₹{trade.liveLTP?.toFixed(2)}</td>
+                <td className={`p-4 text-right font-mono font-bold ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(2)}
+                </td>
                 <td className="p-4 text-right">
                   <button 
-                    onClick={() => handleExitTrade(trade._id, trade.qty, trade.entryPrice * 1.05)} // Mocking +5% exit for testing UI
-                    className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-semibold transition-colors"
+                    onClick={() => handleExitTrade(trade._id, trade.qty, trade.liveLTP)} 
+                    className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-semibold transition-colors"
                   >
-                    Mock Close
+                    Close MTM
                   </button>
                 </td>
               </tr>

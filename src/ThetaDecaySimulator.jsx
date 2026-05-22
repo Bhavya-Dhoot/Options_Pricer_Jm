@@ -975,7 +975,7 @@ export default function ThetaDecaySimulator() {
 
   //  Live data 
   const live = useLiveData();
-  const availableExpiries = useAvailableExpiries('NIFTY');
+  const { optExpiries: availableExpiries = [] } = useAvailableExpiries('NIFTY');
 
   const handleDataFetched = useCallback((chain, sym) => {
     if (!chain) return;

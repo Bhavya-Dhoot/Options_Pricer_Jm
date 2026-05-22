@@ -8,10 +8,21 @@ export default function ScenarioHeatmap({ legs, globalInputs }) {
   // Spot changes: -15% to +15% in 2% steps (16 rows)
   const spotChanges = Array.from({ length: 16 }, (_, i) => -0.15 + (i * 0.02)).reverse();
   
-  // Days Held: 0, 5, 10, 15, 20, 30 DTE remaining. But wait, DTE remaining means T decreases.
-  // Actually, days held means days passed. If max DTE is 30, days held = [0, 5, 10, 15, 20, 30].
-  // Remaining = maxDTE - daysHeld.
-  const daysHeldList = [0, 5, 10, 15, 20, 30];
+  const daysHeldList = useMemo(() => {
+    if (!legs || legs.length === 0) return [0];
+    const maxT = Math.max(...legs.map(l => l.T));
+    const maxDays = Math.max(1, Math.round(maxT * 365));
+    
+    const list = [];
+    if (maxDays <= 5) {
+      for (let i = 0; i <= maxDays; i++) list.push(i);
+    } else {
+      const step = Math.ceil(maxDays / 5);
+      for (let i = 0; i < maxDays; i += step) list.push(i);
+      if (list[list.length - 1] !== maxDays) list.push(maxDays);
+    }
+    return list;
+  }, [legs]);
 
   useEffect(() => {
     if (!legs || legs.length === 0) {
@@ -30,8 +41,7 @@ export default function ScenarioHeatmap({ legs, globalInputs }) {
         const spot = globalInputs.spot * (1 + change);
         
         const row = daysHeldList.map(daysHeld => {
-          if (daysHeld > maxDays) return null; // Strategy already expired
-          const tRemaining = (maxDays - daysHeld) / 365;
+          const tRemaining = Math.max(0, (maxDays - daysHeld) / 365);
           const pnl = strategyBSMPnL(legs, spot, tRemaining, globalInputs.iv, globalInputs.rate, globalInputs.dividend);
           return pnl;
         });

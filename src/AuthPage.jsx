@@ -3,7 +3,7 @@ import { User, Lock, Mail, ChevronRight, LogIn, UserPlus } from 'lucide-react';
 
 export default function AuthPage({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ export default function AuthPage({ onLogin }) {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ username, password })
       });
       
       const data = await res.json();
@@ -58,16 +58,16 @@ export default function AuthPage({ onLogin }) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#8b949e] mb-1.5 uppercase tracking-wider">Email Address</label>
+            <label className="block text-xs font-semibold text-[#8b949e] mb-1.5 uppercase tracking-wider">Username</label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" size={16} />
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" size={16} />
               <input 
-                type="email" 
+                type="text" 
                 required
                 className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg py-2.5 pl-10 pr-4 text-[#e6edf3] focus:border-blue-500 focus:outline-none transition-colors"
-                placeholder="trader@example.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
+                placeholder="johndoe"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
               />
             </div>
           </div>
