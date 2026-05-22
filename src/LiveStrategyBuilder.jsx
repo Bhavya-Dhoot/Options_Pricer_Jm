@@ -89,8 +89,10 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
         const strikeData = live.data.strikeRecords?.find(s => s.strike === leg.strike);
         if (strikeData) {
           const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
-          if (optData?.ltp) {
-            newPremium = optData.ltp;
+          if (optData) {
+            const bid = optData.bidPrice || optData.ltp || 0;
+            const ask = optData.askPrice || optData.ltp || 0;
+            newPremium = leg.action === 'sell' ? bid : ask;
           }
         }
       }
@@ -149,7 +151,10 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
     } else if (live.data?.strikeRecords) {
       const strikeData = live.data.strikeRecords.find(s => s.strike === defaultStrike);
       if (strikeData) {
-        initialPremium = type === 'call' ? (strikeData.call?.ltp || 0) : (strikeData.put?.ltp || 0);
+        const optData = type === 'call' ? strikeData.call : strikeData.put;
+        if (optData) {
+          initialPremium = optData.askPrice || optData.ltp || 0;
+        }
       }
     }
 
@@ -170,8 +175,8 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       if (l.id !== id) return l;
       const updated = { ...l, ...updates };
       
-      // Auto-bind premium if strike or type changes
-      if (updates.strike !== undefined || updates.type !== undefined) {
+      // Auto-bind premium if strike or type or action changes
+      if (updates.strike !== undefined || updates.type !== undefined || updates.action !== undefined) {
         if (updated.type === 'future') {
           updated.premium = live.data?.futurePrice || live.data?.spot || 0;
           updated.strike = 0; // Futures don't have a strike
@@ -185,7 +190,12 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
           }
           const strikeData = live.data.strikeRecords.find(s => s.strike === updated.strike);
           if (strikeData) {
-            updated.premium = updated.type === 'call' ? (strikeData.call?.ltp || 0) : (strikeData.put?.ltp || 0);
+            const optData = updated.type === 'call' ? strikeData.call : strikeData.put;
+            if (optData) {
+              const bid = optData.bidPrice || optData.ltp || 0;
+              const ask = optData.askPrice || optData.ltp || 0;
+              updated.premium = updated.action === 'sell' ? bid : ask;
+            }
           }
         }
       }

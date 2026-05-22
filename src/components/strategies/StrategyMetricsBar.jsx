@@ -31,6 +31,7 @@ export default function StrategyMetricsBar({ legs, globalInputs }) {
     
     // Net Premium
     const netPremium = legs.reduce((total, leg) => {
+      if (leg.type === 'future' || leg.type === 'underlying') return total;
       const sign = leg.action === 'buy' ? -1 : 1;
       return total + sign * leg.premium * leg.qty * NIFTY_LOT_SIZE;
     }, 0);
