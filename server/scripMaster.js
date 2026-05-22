@@ -99,3 +99,11 @@ export function getAvailableFutureExpiries(symbol) {
 
   return Array.from(expiries).sort((a, b) => parseDate(a) - parseDate(b));
 }
+
+export function getLotSize(symbol) {
+  const options = nfoMaster.filter(s => s.name === symbol);
+  if (options.length > 0 && options[0].lotsize) {
+    return parseInt(options[0].lotsize, 10);
+  }
+  return 1;
+}

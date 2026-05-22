@@ -31,7 +31,7 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
 
   if (!legs || legs.length === 0 || !spotPrice) return zeroMargin;
   
-  const lotSize = getLotSize(symbol);
+  const lotSize = legs[0]?.lotSize || getLotSize(symbol);
   
   let totalMargin = 0;
   

@@ -139,6 +139,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
   }, [live.data, targetExpiry]);
 
   const getLotSize = (sym) => {
+    if (live.data?.lotSize) return live.data.lotSize;
     if (sym === 'BANKNIFTY') return 15;
     if (sym === 'FINNIFTY') return 40;
     if (sym === 'MIDCPNIFTY') return 75;
@@ -172,7 +173,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
     }
 
     setLegs(prev => [...prev, {
-      id: `leg_${Date.now()}`,
+      id: `leg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       type: type,
       action: 'buy',
       strike: type === 'future' ? 0 : defaultStrike,

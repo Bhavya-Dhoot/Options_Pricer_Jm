@@ -3,7 +3,7 @@ import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, ReferenceLine
 } from 'recharts';
-import { calculateBSM, NIFTY_LOT_SIZE } from '../../bsm.js';
+import { calculateBSM } from '../../bsm.js';
 
 export default function GreeksSurfaceChart({ legs, globalInputs, spotRangePercent }) {
   const [visible, setVisible] = useState({
@@ -30,9 +30,10 @@ export default function GreeksSurfaceChart({ legs, globalInputs, spotRangePercen
       let netDelta = 0, netGamma = 0, netTheta = 0, netVega = 0;
       
       legs.forEach(leg => {
+        const lotSize = leg.lotSize || 25;
         if (leg.type === 'underlying') {
           const sign = leg.action === 'buy' ? 1 : -1;
-          netDelta += sign * leg.qty * NIFTY_LOT_SIZE;
+          netDelta += sign * leg.qty * lotSize;
         } else {
           const bsm = calculateBSM(
             s, leg.strike, leg.T, globalInputs.rate, 
@@ -40,10 +41,10 @@ export default function GreeksSurfaceChart({ legs, globalInputs, spotRangePercen
           );
           if (bsm) {
             const sign = leg.action === 'buy' ? 1 : -1;
-            netDelta += sign * bsm.delta * leg.qty * NIFTY_LOT_SIZE;
-            netGamma += sign * bsm.gamma * leg.qty * NIFTY_LOT_SIZE;
-            netTheta += sign * bsm.theta * leg.qty * NIFTY_LOT_SIZE;
-            netVega += sign * bsm.vega * leg.qty * NIFTY_LOT_SIZE;
+            netDelta += sign * bsm.delta * leg.qty * lotSize;
+            netGamma += sign * bsm.gamma * leg.qty * lotSize;
+            netTheta += sign * bsm.theta * leg.qty * lotSize;
+            netVega += sign * bsm.vega * leg.qty * lotSize;
           }
         }
       });

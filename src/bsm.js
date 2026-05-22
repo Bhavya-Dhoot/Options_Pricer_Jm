@@ -61,7 +61,9 @@ export function countTradingDays(startDate, endDate) {
 export function calculateBSM(S, K, T, r, sigma, optionType, q = 0) {
   // T is in years (calendarDays / 365)
   // q is continuous dividend yield (e.g. 0.012 for 1.2%)
-  if (T <= 0 && optionType !== 'UNDERLYING') return null;
+  if (T <= 0 && optionType !== 'UNDERLYING') {
+    T = 1e-5; // Protective epsilon to prevent divide-by-zero
+  }
 
   if (optionType === 'UNDERLYING') {
     return {

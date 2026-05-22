@@ -9,7 +9,8 @@ import {
   getOptionTokens, 
   getAvailableExpiries, 
   getFutureToken,
-  getAvailableFutureExpiries 
+  getAvailableFutureExpiries,
+  getLotSize 
 } from './scripMaster.js';
 import { solveImpliedIV } from '../src/bsm.js';
 
@@ -249,6 +250,7 @@ app.get('/api/option-chain', async (req, res) => {
 
     const finalResponse = {
       spot: spotPrice,
+      lotSize: getLotSize(symbol),
       futurePrice: futurePrice,
       futurePrices: futurePrices,
       timestamp: new Date().toISOString(),
