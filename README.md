@@ -121,14 +121,14 @@ Options Pricer/
 | **Deployment** | Docker, Render |
 | **Math** | Pure JavaScript BSM engine, Lognormal Integrator, Newton-Raphson |
 
-### 6. Central Choke Point (Tri-Window Rate Limiter)
+### 6. Endpoint-Aware Throttling Engine
 To completely eradicate `403 Access denied` errors without compromising UI responsiveness, the entire API interaction layer routes through a mathematical global queue. 
-Rather than relying on a static delay, it implements an advanced **Tri-Window Sliding Rate Limiter** that algorithmically ensures we never breach any of Angel One's hard limits for the `/quote` endpoint:
-- **1-Second Window:** Max 10 requests
-- **1-Minute Window:** Max 500 requests
-- **1-Hour Window:** Max 5000 requests
+Rather than relying on a static delay, it implements an advanced **Endpoint-Aware Sliding Rate Limiter** that algorithmically ensures we never breach any of Angel One's hard limits by tracking sliding windows independently per specific endpoint route:
+- `/quote`: 10/s, 500/m, 5000/h
+- `/getCandleData`: 3/s, 180/m, 5000/h
 
-If any of these three windows hit absolute mathematical capacity, the underlying Promise is paused for the exact nanoseconds required until the oldest token expires. To guarantee UI snappiness, the background polling daemon is permanently throttled to `900ms` (4000 req/hour), strictly reserving 20% of the API quota exclusively for manual UI bursts!
+If any of the three windows (1s, 60s, 3600s) for a specific endpoint hits absolute mathematical capacity, the underlying Promise is paused for the exact nanoseconds required until the oldest token expires. To guarantee UI snappiness, the background polling daemon is permanently throttled to `900ms` (4000 req/hour), strictly reserving 20% of the API quota exclusively for manual UI bursts.
+Furthermore, all state-mutating endpoints (`placeOrder`, `modifyOrder`, `cancelOrder`, etc.) have been completely removed from the router's allowed dictionary, mathematically ensuring that the system is perfectly locked into a fail-safe, read-only Simulation & Strategy Building mode.
 
 ### 7. Core CPU Eradication (HTTP Loopback & React Debouncing)
 We eliminated all local TCP/HTTP loopbacks. The background daemon no longer queries its own Express router via `fetch`, but instead imports and natively executes the decoupled `fetchMarketDataChain` function directly at raw V8 engine speed.
