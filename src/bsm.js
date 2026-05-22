@@ -61,7 +61,29 @@ export function countTradingDays(startDate, endDate) {
 export function calculateBSM(S, K, T, r, sigma, optionType, q = 0) {
   // T is in years (calendarDays / 365)
   // q is continuous dividend yield (e.g. 0.012 for 1.2%)
-  if (T <= 0) return null;
+  if (T <= 0 && optionType !== 'UNDERLYING') return null;
+
+  if (optionType === 'UNDERLYING') {
+    return {
+      premium: S, delta: 1, gamma: 0, theta: 0, vega: 0, rho: 0,
+      intrinsicValue: S, timeValue: 0, moneyness: 'N/A'
+    };
+  }
+
+  if (optionType === 'FUTURE') {
+    const fPremium = S * Math.exp((r - q) * T);
+    return {
+      premium: fPremium,
+      delta: Math.exp((r - q) * T),
+      gamma: 0,
+      theta: (-(S * (r - q) * Math.exp((r - q) * T))) / 365,
+      vega: 0,
+      rho: (S * T * Math.exp((r - q) * T)) / 100,
+      intrinsicValue: S,
+      timeValue: fPremium - S,
+      moneyness: 'N/A'
+    };
+  }
 
   const sqrtT = Math.sqrt(T);
   const d1 = (Math.log(S / K) + (r - q + (sigma * sigma) / 2) * T) / (sigma * sqrtT);
@@ -123,6 +145,12 @@ export function calculateBSM(S, K, T, r, sigma, optionType, q = 0) {
 
 // ── Recalculate premium at a different spot/time ──
 export function premiumAt(S, K, T, r, sigma, optionType, q = 0) {
+  if (optionType === 'FUTURE') {
+    return S * Math.exp((r - q) * T);
+  }
+  if (optionType === 'UNDERLYING') {
+    return S;
+  }
   if (T <= 0) {
     // At expiry, premium = intrinsic value only
     return optionType === 'CALL' ? Math.max(S - K, 0) : Math.max(K - S, 0);

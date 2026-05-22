@@ -42,17 +42,20 @@ export default function LegConfigurator({ legs, onUpdateLeg, onAddLeg, onRemoveL
                   <select 
                     value={leg.type} 
                     onChange={e => onUpdateLeg(leg.id, { type: e.target.value })}
-                    className="bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold text-[#e6edf3] focus:outline-none"
+                    className="bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold text-[#e6edf3] focus:outline-none min-w-[70px]"
                   >
                     <option value="call">Call</option>
                     <option value="put">Put</option>
+                    <option value="future">Future</option>
                     <option value="underlying">Spot</option>
                   </select>
                 </div>
               </td>
               <td className="py-2.5">
-                {leg.type === 'underlying' ? (
-                  <span className="text-[#e6edf3] font-mono">Spot</span>
+                {leg.type === 'underlying' || leg.type === 'future' ? (
+                  <span className="text-[#e6edf3] font-mono px-2 py-1 bg-[#161b22] rounded border border-[#30363d] text-xs">
+                    {leg.type === 'future' ? 'FUT' : 'SPOT'}
+                  </span>
                 ) : (
                   <input 
                     type="number" 

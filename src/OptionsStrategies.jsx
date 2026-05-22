@@ -110,7 +110,20 @@ export default function OptionsStrategies({ liveSpot, liveIV, riskFreeRate }) {
     }
   }, [selectedStrategyId, globalInputs.spot, globalInputs.dte, globalInputs.farDte, globalInputs.iv, globalInputs.rate, globalInputs.dividend]); // Note: In a real app we might want to prevent overwriting user edits on spot change, but this matches the previous behavior.
 
-  const updateLeg = (id, updates) => setLegs(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
+  const updateLeg = (id, updates) => setLegs(prev => prev.map(l => {
+    if (l.id !== id) return l;
+    const updated = { ...l, ...updates };
+    
+    // Recalculate theoretical premium if strike, DTE, or type changes
+    if (updates.strike !== undefined || updates.T !== undefined || updates.type !== undefined) {
+      if (updated.type === 'underlying') {
+        updated.premium = globalInputs.spot;
+      } else {
+        updated.premium = premiumAt(globalInputs.spot, updated.strike, updated.T, globalInputs.rate, globalInputs.iv, updated.type.toUpperCase(), globalInputs.dividend);
+      }
+    }
+    return updated;
+  }));
   const removeLeg = (id) => setLegs(prev => prev.filter(l => l.id !== id));
   const addLeg = () => {
     setLegs(prev => [...prev, {
