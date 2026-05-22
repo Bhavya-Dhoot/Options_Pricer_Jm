@@ -47,16 +47,17 @@ app.get('/api/option-chain', async (req, res) => {
   }
 
   try {
-    const underlyingToken = getUnderlyingToken(symbol);
-    if (!underlyingToken) {
+    const spotToken = getUnderlyingToken(symbol);
+    if (!spotToken) {
       return res.status(404).json({ error: `Underlying token not found for ${symbol}` });
     }
 
-    // 1. Fetch Spot Price
+    const spotExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BSE' : 'NSE';
+
     const spotQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
-      mode: 'LTP',
+      mode: 'FULL',
       exchangeTokens: {
-        NSE: [underlyingToken]
+        [spotExchange]: [spotToken]
       }
     });
 
@@ -130,12 +131,14 @@ app.get('/api/option-chain', async (req, res) => {
     // 4. Fetch Options Data (Batch up to 50 tokens at a time)
     // We have at most 31 strikes * 2 = 62 tokens, so 2 batches
     const fetchedOptions = [];
+    const optExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BFO' : 'NFO';
+    
     for (let i = 0; i < tokensToFetch.length; i += 50) {
       const batch = tokensToFetch.slice(i, i + 50);
       const optQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
         mode: 'FULL',
         exchangeTokens: {
-          NFO: batch
+          [optExchange]: batch
         }
       });
       if (optQuote?.data?.fetched) {

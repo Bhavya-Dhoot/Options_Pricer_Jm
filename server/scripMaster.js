@@ -13,11 +13,11 @@ export async function initScripMaster() {
     const response = await axios.get(SCRIP_MASTER_URL);
     scripMaster = response.data;
     
-    // Filter to just NSE and NFO for fast lookups
-    nfoMaster = scripMaster.filter(s => s.exch_seg === 'NFO' && (s.instrumenttype === 'OPTIDX' || s.instrumenttype === 'OPTSTK'));
-    nseMaster = scripMaster.filter(s => s.exch_seg === 'NSE');
+    // Filter to just NSE/BSE and NFO/BFO for fast lookups
+    nfoMaster = scripMaster.filter(s => (s.exch_seg === 'NFO' || s.exch_seg === 'BFO') && (s.instrumenttype === 'OPTIDX' || s.instrumenttype === 'OPTSTK'));
+    nseMaster = scripMaster.filter(s => s.exch_seg === 'NSE' || s.exch_seg === 'BSE');
     
-    console.log(`[ScripMaster] Loaded ${nseMaster.length} NSE equities and ${nfoMaster.length} NFO options.`);
+    console.log(`[ScripMaster] Loaded ${nseMaster.length} Spot equities/indices and ${nfoMaster.length} Options.`);
   } catch (err) {
     console.error('[ScripMaster] Failed to download Scrip Master:', err.message);
     throw err;
@@ -38,6 +38,8 @@ export function getUnderlyingToken(symbol) {
   if (symbol === 'BANKNIFTY') return '26009';
   if (symbol === 'FINNIFTY') return '26037';
   if (symbol === 'MIDCPNIFTY') return '26074';
+  if (symbol === 'SENSEX') return '99919000';
+  if (symbol === 'BANKEX') return '99919013'; // Typically 99919013, though relies on nseMaster fallback too
   
   return null;
 }
