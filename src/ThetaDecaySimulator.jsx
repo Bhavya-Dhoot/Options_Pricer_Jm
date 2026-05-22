@@ -1088,7 +1088,7 @@ export default function ThetaDecaySimulator() {
   }, [spotPrice, strikePrice, calendarDays, riskFreeRate, iv, dividendYield, optionType, canShow, marketPremium]);
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
       {/*  Header  */}
       <div className="flex items-center justify-between mb-3">
         <div>
@@ -1102,11 +1102,13 @@ export default function ThetaDecaySimulator() {
 
       <LiveFetchBar onFetchComplete={handleDataFetched} />
 
-      {/*  Parameter Bar  */}
-      <div className="card p-4 mb-5">
-        <span className="text-xs font-medium text-[#8b949e] uppercase tracking-wider block mb-3">Parameters</span>
-        <div className="flex flex-wrap gap-3 items-end">
-          {/* Spot */}
+      {/*  Layout Wrapper  */}
+      <div className="flex flex-col lg:flex-row gap-6 mt-5 items-start">
+        {/*  Parameter Bar (Sidebar)  */}
+        <div className="card p-5 w-full lg:w-[320px] shrink-0 lg:sticky lg:top-4 z-10">
+          <span className="text-xs font-medium text-[#8b949e] uppercase tracking-wider block mb-4">Parameters</span>
+          <div className="flex flex-col gap-4">
+            {/* Spot */}
           <div className="flex-1 min-w-[120px]">
             <label className="block text-xs font-medium text-[#e6edf3] mb-1">Spot Price (₹)</label>
             <input type="number" value={spotPrice} onChange={(e) => setSpotPrice(Number(e.target.value))} />
@@ -1204,7 +1206,9 @@ export default function ThetaDecaySimulator() {
         </div>
       </div>
 
-      {/*  Expired Banner  */}
+      {/* RIGHT CONTENT */}
+      <div className="flex-1 min-w-0 flex flex-col gap-6 w-full">
+        {/*  Expired Banner  */}
       {isExpired && expiryDate && (
         <div className="mb-4 p-3 rounded-xl bg-[#f8514915] border border-[#f8514940] flex items-center gap-2">
           <AlertTriangle size={16} className="text-[#f85149] shrink-0" />
@@ -1216,7 +1220,7 @@ export default function ThetaDecaySimulator() {
       {canShow && metrics && (
         <>
           {/*  Summary Metrics  */}
-          <div className="flex flex-wrap gap-3 mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-2">
             <MetricCard
               icon={Clock}
               iconColor="#e3b341"
@@ -1302,6 +1306,8 @@ export default function ThetaDecaySimulator() {
           </div>
         </>
       )}
+      </div>
+      </div>
 
       {/*  Footer  */}
       <footer className="text-center py-6 border-t border-[#30363d]">
