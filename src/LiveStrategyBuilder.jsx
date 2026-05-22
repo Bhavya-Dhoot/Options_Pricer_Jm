@@ -13,6 +13,15 @@ import { useAvailableExpiries } from './useLiveData.js';
 import { AlertCircle } from 'lucide-react';
 import StrategyTemplates from './components/strategies/StrategyTemplates.jsx';
 
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => { setDebouncedValue(value); }, delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
 function calculateDTE(expiryStr) {
   if (!expiryStr) return 30;
   try {
@@ -642,12 +651,12 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
 
         {/* Greeks Surface */}
         <div className="card p-4">
-          <GreeksSurfaceChart legs={legs} globalInputs={globalInputs} spotRangePercent={15} />
+          <GreeksSurfaceChart legs={debouncedLegs} globalInputs={debouncedGlobalInputs} spotRangePercent={15} />
         </div>
 
         {/* Scenario Heatmap */}
         <div className="card p-4">
-          <ScenarioHeatmap legs={legs} globalInputs={globalInputs} />
+          <ScenarioHeatmap legs={debouncedLegs} globalInputs={debouncedGlobalInputs} />
         </div>
 
       </div>

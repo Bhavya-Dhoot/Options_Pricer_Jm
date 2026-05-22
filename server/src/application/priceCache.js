@@ -1,6 +1,7 @@
 import { smartApiRequest } from '../../angelOneAuth.js';
 import { getFutureToken, getOptionTokens, getUnderlyingToken } from '../../scripMaster.js';
 import { MarketSnapshot } from '../domain/MarketSnapshot.js';
+import { fetchMarketDataChain } from '../../proxy.js';
 
 // Global cache
 // { "NIFTY": { spot: 24500, iv: 0.15, optionChain: [...], futures: {...}, timestamp: 123456 } }
@@ -81,10 +82,9 @@ export const startPriceCacheLoop = () => {
         // Prevent polling the identical symbol faster than 1000ms to save API quota
         if (!lastPolledTime[targetSymbol] || (now - lastPolledTime[targetSymbol] >= 1000)) {
           lastPolledTime[targetSymbol] = now;
-          const port = process.env.PORT || 3001;
-          const res = await fetch(`http://localhost:${port}/api/option-chain?symbol=${targetSymbol}&force=true`);
-        if (res.ok) {
-          const data = await res.json();
+          
+          const data = await fetchMarketDataChain(targetSymbol, null, null);
+          
           priceCache[targetSymbol] = {
             data: data,
             timestamp: Date.now()
@@ -101,13 +101,14 @@ export const startPriceCacheLoop = () => {
             }).catch(e => console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message));
           }
         }
-        }
       }
     } catch (err) {
       console.error(`[PriceCache] Fetch Error: ${err.message}`);
     } finally {
-      // Strictly wait 335ms to ensure we do not exceed 3 requests per second
-      setTimeout(fetchLoop, 335);
+      // Throttle the daemon to exactly 900ms per request.
+      // 1 req / 900ms = 4000 requests per hour.
+      // This strictly reserves 1000 requests per hour (20% of the quota) exclusively for UI bursts!
+      setTimeout(fetchLoop, 900);
     }
   };
 

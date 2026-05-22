@@ -68,36 +68,24 @@ let cache = {
   symbol: null
 };
 
-app.get('/api/option-chain', async (req, res) => {
-  const symbol = req.query.symbol?.toUpperCase() || 'NIFTY';
-  const force = req.query.force === 'true';
-  const targetExpiry = req.query.optExpiry || req.query.expiry;
-  const futureExpiry = req.query.futExpiry;
+export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
+  symbol = symbol?.toUpperCase() || 'NIFTY';
+  
+  const spotToken = getUnderlyingToken(symbol);
+  if (!spotToken) throw new Error(`Underlying token not found for ${symbol}`);
 
-  console.log(`[/api/option-chain] Request for ${symbol}`);
+  const spotExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BSE' : 'NSE';
 
-  if (!force && cache.data && cache.symbol === symbol && (Date.now() - cache.timestamp < 15000)) {
-    return res.json(cache.data);
-  }
-
-  try {
-    const spotToken = getUnderlyingToken(symbol);
-    if (!spotToken) {
-      return res.status(404).json({ error: `Underlying token not found for ${symbol}` });
-    }
-
-    const spotExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BSE' : 'NSE';
-
-    // OPTIMIZATION: Use cached spot price to estimate ATM strikes to save an API call
-    let approxSpot = (cache.data && cache.symbol === symbol) ? cache.data.spot : null;
-    
-    if (!approxSpot) {
-      const spotQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
-        mode: 'FULL',
-        exchangeTokens: {
-          [spotExchange]: [spotToken]
-        }
-      });
+  // OPTIMIZATION: Use cached spot price to estimate ATM strikes to save an API call
+  let approxSpot = (cache.data && cache.symbol === symbol) ? cache.data.spot : null;
+  
+  if (!approxSpot) {
+    const spotQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
+      mode: 'FULL',
+      exchangeTokens: {
+        [spotExchange]: [spotToken]
+      }
+    });
       const spotData = spotQuote?.data?.fetched?.[0];
       if (!spotData) {
         return res.status(500).json({ error: `Could not fetch spot price for ${symbol}` });
@@ -296,10 +284,27 @@ app.get('/api/option-chain', async (req, res) => {
     };
 
     cache = { data: finalResponse, timestamp: Date.now(), symbol };
+    return finalResponse;
+}
+
+app.get('/api/option-chain', async (req, res) => {
+  const symbol = req.query.symbol?.toUpperCase() || 'NIFTY';
+  const force = req.query.force === 'true';
+  const targetExpiry = req.query.optExpiry || req.query.expiry;
+  const futureExpiry = req.query.futExpiry;
+
+  console.log(`[/api/option-chain] Request for ${symbol}`);
+
+  if (!force && cache.data && cache.symbol === symbol && (Date.now() - cache.timestamp < 15000)) {
+    return res.json(cache.data);
+  }
+
+  try {
+    const finalResponse = await fetchMarketDataChain(symbol, targetExpiry, futureExpiry);
     res.json(finalResponse);
   } catch (error) {
     console.error(`[/api/option-chain] Error for ${symbol}:`, error.message);
-    res.status(500).json({ error: error.message });
+    res.status(error.message.includes('not found') ? 404 : 500).json({ error: error.message });
   }
 });
 
