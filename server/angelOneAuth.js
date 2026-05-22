@@ -64,44 +64,83 @@ export function clearSession() {
 }
 
 // ==========================================
-// CENTRAL CHOKE POINT: TRI-WINDOW RATE LIMITER
-// Limits for /quote: 10/sec, 500/min, 5000/hour
+// CENTRAL CHOKE POINT: ENDPOINT-AWARE RATE LIMITER
 // ==========================================
+
+const API_LIMITS = {
+  '/rest/auth/angelbroking/user/v1/loginByPassword': { s: 1, m: Infinity, h: Infinity },
+  '/rest/auth/angelbroking/jwt/v1//generateTokens': { s: 1, m: Infinity, h: 1000 },
+  '/rest/secure/angelbroking/user/v1/getProfile': { s: 3, m: Infinity, h: 1000 },
+  '/rest/secure/angelbroking/user/v1/logout': { s: 1, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/user/v1/getRMS': { s: 2, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/order/v1/placeOrder': { s: 9, m: 500, h: 1000 },
+  '/rest/secure/angelbroking/order/v1/modifyOrder': { s: 9, m: 500, h: 1000 },
+  '/rest/secure/angelbroking/order/v1/cancelOrder': { s: 9, m: 500, h: 1000 },
+  '/rest/secure/angelbroking/order/v1/getOrderBook': { s: 1, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/order/v1/getLtpData': { s: 10, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/order/v1/getPosition': { s: 1, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/order/v1/getTradeBook': { s: 1, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/order/v1/convertPosition': { s: 10, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/order/v1/searchScrip': { s: 1, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/portfolio/v1/getHolding': { s: 1, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/portfolio/v1/getAllHolding': { s: 1, m: Infinity, h: Infinity },
+  '/rest/secure/angelbroking/market/v1/quote': { s: 10, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/margin/v1/batch': { s: 10, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/gtt/v1/createRule': { s: 9, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/gtt/v1/modifyRule': { s: 9, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/gtt/v1/cancelRule': { s: 9, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/gtt/v1/ruleDetails': { s: 10, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/gtt/v1/ruleList': { s: 10, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/historical/v1/getCandleData': { s: 3, m: 180, h: 5000 },
+  '/rest/secure/angelbroking/marketData/v1/optionGreek': { s: 1, m: Infinity, h: Infinity }
+};
+
 const requestQueue = [];
 let isProcessingQueue = false;
-let requestTimestamps = []; // Stores timestamps of executed requests
+const endpointTimestamps = new Map(); // Stores timestamps per endpoint
 
-const getRequiredDelay = () => {
+const getRequiredDelay = (endpoint) => {
+  // Normalize dynamic endpoints like details/{GuiOrderID} if needed, but for now exact match is fine
+  // Fallback limit for unknown endpoints
+  const limits = API_LIMITS[endpoint] || { s: 1, m: 60, h: 1000 };
+  
+  if (!endpointTimestamps.has(endpoint)) {
+    endpointTimestamps.set(endpoint, []);
+  }
+  
+  let timestamps = endpointTimestamps.get(endpoint);
   const now = Date.now();
+  
   // Prune timestamps older than 1 hour (3600000 ms)
-  requestTimestamps = requestTimestamps.filter(t => now - t <= 3600000);
+  timestamps = timestamps.filter(t => now - t <= 3600000);
+  endpointTimestamps.set(endpoint, timestamps);
 
   // Filter timestamps into the 3 windows
-  const last1Sec = requestTimestamps.filter(t => now - t <= 1000);
-  const last60Sec = requestTimestamps.filter(t => now - t <= 60000);
-  const last3600Sec = requestTimestamps; // Already pruned to 1 hr
+  const last1Sec = timestamps.filter(t => now - t <= 1000);
+  const last60Sec = timestamps.filter(t => now - t <= 60000);
+  const last3600Sec = timestamps; // Already pruned to 1 hr
 
   let requiredDelay = 0;
 
-  // Window 1: 10 per second
-  if (last1Sec.length >= 10) {
-    const oldestIn1Sec = last1Sec[last1Sec.length - 10]; // 10th most recent
-    const delayToClear1Sec = 1000 - (now - oldestIn1Sec);
-    if (delayToClear1Sec > requiredDelay) requiredDelay = delayToClear1Sec;
+  // Window 1: Limit per second
+  if (last1Sec.length >= limits.s) {
+    const oldest = last1Sec[last1Sec.length - limits.s]; 
+    const delay = 1000 - (now - oldest);
+    if (delay > requiredDelay) requiredDelay = delay;
   }
 
-  // Window 2: 500 per minute
-  if (last60Sec.length >= 500) {
-    const oldestIn60Sec = last60Sec[last60Sec.length - 500];
-    const delayToClear60Sec = 60000 - (now - oldestIn60Sec);
-    if (delayToClear60Sec > requiredDelay) requiredDelay = delayToClear60Sec;
+  // Window 2: Limit per minute
+  if (limits.m !== Infinity && last60Sec.length >= limits.m) {
+    const oldest = last60Sec[last60Sec.length - limits.m];
+    const delay = 60000 - (now - oldest);
+    if (delay > requiredDelay) requiredDelay = delay;
   }
 
-  // Window 3: 5000 per hour
-  if (last3600Sec.length >= 5000) {
-    const oldestIn3600Sec = last3600Sec[last3600Sec.length - 5000];
-    const delayToClear3600Sec = 3600000 - (now - oldestIn3600Sec);
-    if (delayToClear3600Sec > requiredDelay) requiredDelay = delayToClear3600Sec;
+  // Window 3: Limit per hour
+  if (limits.h !== Infinity && last3600Sec.length >= limits.h) {
+    const oldest = last3600Sec[last3600Sec.length - limits.h];
+    const delay = 3600000 - (now - oldest);
+    if (delay > requiredDelay) requiredDelay = delay;
   }
 
   return requiredDelay;
@@ -112,14 +151,15 @@ const processQueue = async () => {
   isProcessingQueue = true;
 
   while (requestQueue.length > 0) {
-    const requiredDelay = getRequiredDelay();
+    const nextRequest = requestQueue[0];
+    const requiredDelay = getRequiredDelay(nextRequest.endpoint);
     
     if (requiredDelay > 0) {
       await new Promise(resolve => setTimeout(resolve, requiredDelay + 10)); // +10ms padding
     }
     
-    const { requestFn, resolve, reject } = requestQueue.shift();
-    requestTimestamps.push(Date.now());
+    const { endpoint, requestFn, resolve, reject } = requestQueue.shift();
+    endpointTimestamps.get(endpoint).push(Date.now());
     
     try {
       const result = await requestFn();
@@ -155,6 +195,7 @@ export async function smartApiRequest(endpoint, payload) {
   
   return new Promise((resolve, reject) => {
     requestQueue.push({
+      endpoint,
       requestFn: async () => {
         try {
           const data = await executeAxiosRequest(endpoint, payload, sessionData.jwtToken);
