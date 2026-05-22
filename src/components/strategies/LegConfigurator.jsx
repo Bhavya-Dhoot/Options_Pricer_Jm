@@ -21,7 +21,8 @@ export default function LegConfigurator({ legs, onUpdateLeg, onAddLeg, onRemoveL
             <th className="pb-2 font-medium w-24">Strike</th>
             <th className="pb-2 font-medium w-20">DTE</th>
             <th className="pb-2 font-medium w-20">Lots</th>
-            <th className="pb-2 font-medium w-24">Premium</th>
+            <th className="pb-2 font-medium w-24">Entry Price</th>
+            <th className="pb-2 font-medium w-24">Breakeven</th>
             <th className="pb-2 font-medium w-8"></th>
           </tr>
         </thead>
@@ -92,11 +93,20 @@ export default function LegConfigurator({ legs, onUpdateLeg, onAddLeg, onRemoveL
                   <input 
                     type="number" 
                     step="0.05"
-                    value={leg.premium.toFixed(2)} 
+                    value={leg.premium} 
                     onChange={e => onUpdateLeg(leg.id, { premium: Number(e.target.value) })}
-                    className="w-20 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e3b341] font-mono focus:border-[#e3b341] focus:outline-none"
+                    className="w-24 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e3b341] font-mono focus:border-[#e3b341] focus:outline-none"
                   />
                 </div>
+              </td>
+              <td className="py-2.5">
+                <span className="text-[#58a6ff] font-mono font-semibold">
+                  {leg.type === 'call' 
+                    ? (leg.strike + leg.premium).toFixed(2) 
+                    : leg.type === 'put' 
+                      ? (leg.strike - leg.premium).toFixed(2) 
+                      : leg.premium.toFixed(2)}
+                </span>
               </td>
               <td className="py-2.5 text-right">
                 <button 

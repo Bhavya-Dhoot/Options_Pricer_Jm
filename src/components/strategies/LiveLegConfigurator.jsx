@@ -22,6 +22,7 @@ export default function LiveLegConfigurator({ legs, availableStrikes = [], onUpd
             <th className="pb-2 font-medium w-32">Strike</th>
             <th className="pb-2 font-medium w-20">Lots</th>
             <th className="pb-2 font-medium w-24">Entry Price</th>
+            <th className="pb-2 font-medium w-24">Breakeven</th>
             <th className="pb-2 font-medium w-8"></th>
           </tr>
         </thead>
@@ -89,6 +90,15 @@ export default function LiveLegConfigurator({ legs, availableStrikes = [], onUpd
                     placeholder="LTP"
                   />
                 </div>
+              </td>
+              <td className="py-2.5">
+                <span className="text-[#58a6ff] font-mono font-semibold">
+                  {leg.type === 'call' 
+                    ? (leg.strike + leg.premium).toFixed(2) 
+                    : leg.type === 'put' 
+                      ? (leg.strike - leg.premium).toFixed(2) 
+                      : leg.premium.toFixed(2)}
+                </span>
               </td>
               <td className="py-2.5 text-right">
                 <button 
