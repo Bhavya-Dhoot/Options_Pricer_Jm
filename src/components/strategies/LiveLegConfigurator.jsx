@@ -1,7 +1,7 @@
 import React from 'react';
 import { Trash2, Plus } from 'lucide-react';
 
-export default function LiveLegConfigurator({ legs, expiryDates = [], byExpiry = {}, onUpdateLeg, onAddLeg, onRemoveLeg, futurePrice, fetchExpiry }) {
+export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryDates = [], byExpiry = {}, onUpdateLeg, onAddLeg, onRemoveLeg, futurePrice, fetchExpiry }) {
   const getBadgeColor = (type, action) => {
     if (type === 'call' && action === 'buy') return 'text-green-400';
     if (type === 'put' && action === 'buy') return 'text-red-400';
@@ -53,9 +53,25 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], byExpiry =
               </td>
               <td className="py-2.5">
                 {leg.type === 'future' ? (
-                  <span className="text-[#8b949e] font-mono text-xs px-2 py-1 bg-[#161b22] rounded border border-[#30363d]">
-                    FUT
-                  </span>
+                  <div className="flex flex-col gap-1 w-44">
+                    <select
+                      value={leg.expiry || ''}
+                      onChange={e => {
+                        const newExp = e.target.value;
+                        if (fetchExpiry) fetchExpiry(newExp, true);
+                        onUpdateLeg(leg.id, { expiry: newExp });
+                      }}
+                      className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] text-[10px] uppercase focus:border-[#58a6ff] focus:outline-none"
+                    >
+                      <option value="" disabled hidden>Select Expiry</option>
+                      {futExpiryDates.map(exp => (
+                        <option key={exp} value={exp}>{exp}</option>
+                      ))}
+                    </select>
+                    <span className="text-[#8b949e] font-mono text-xs px-2 py-1 bg-[#161b22] rounded border border-[#30363d] text-center">
+                      FUT
+                    </span>
+                  </div>
                 ) : (
                   <div className="flex flex-col gap-1 w-44">
                     <select

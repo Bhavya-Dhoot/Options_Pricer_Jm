@@ -177,8 +177,8 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       qty: 1,
       premium: initialPremium,
       lotSize: getLotSize(live.data?.symbol),
-      T: type === 'future' ? (globalInputs.farDte / 365) : (calculateDTE(exp) / 365),
-      expiry: exp
+      T: type === 'future' ? (calculateDTE(targetFutExpiry || futExpiries?.[0]) / 365) : (calculateDTE(exp) / 365),
+      expiry: type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : exp
     }]);
   };
 
@@ -285,6 +285,69 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
       {/* Metrics Bar */}
       <StrategyMetricsBar legs={legs} globalInputs={globalInputs} />
 
+      {/* Full Width Layout */}
+      <div className="space-y-6">
+        
+        {/* Legs Configurator */}
+        <div className="card p-4">
+          <LiveLegConfigurator 
+            legs={legs}
+            expiryDates={live.data?.expiryDates || []}
+            futExpiryDates={futExpiries || []}
+            byExpiry={live.data?.byExpiry || {}}
+            onUpdateLeg={updateLeg}
+            onAddLeg={addLeg}
+            onRemoveLeg={removeLeg}
+            futurePrice={live.data?.futurePrice}
+            fetchExpiry={(exp, isFut) => {
+              if (isFut) {
+                live.fetchNow(live.data.symbol, { force: false, expiry: targetExpiry, futExpiry: exp });
+              } else {
+                live.fetchNow(live.data.symbol, { force: false, expiry: exp, futExpiry: targetFutExpiry });
+              }
+            }}
+          />
+        </div>
+
+        {/* Payoff Chart */}
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-[#e6edf3]">Payoff Diagram (Live Data)</h3>
+          </div>
+          {legs.length > 0 ? (
+            <PayoffChart 
+              legs={legs} 
+              globalInputs={globalInputs}
+              spotRangePercent={15} 
+            />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-[#8b949e] border border-dashed border-[#30363d] rounded">
+              Add legs to see payoff chart
+            </div>
+          )}
+        </div>
+
+        {/* Probabilities and Theta */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="card p-4">
+            <ProbabilityPanel legs={legs} globalInputs={globalInputs} />
+          </div>
+          <div className="card p-4">
+            <ThetaDecayChart legs={legs} globalInputs={globalInputs} />
+          </div>
+        </div>
+
+        {/* Greeks Surface */}
+        <div className="card p-4">
+          <GreeksSurfaceChart legs={legs} globalInputs={globalInputs} spotRangePercent={15} />
+        </div>
+
+        {/* Scenario Heatmap */}
+        <div className="card p-4">
+          <ScenarioHeatmap legs={legs} globalInputs={globalInputs} />
+        </div>
+
+      </div>
       {/* Detailed Margin Breakdown */}
       {estimatedMargin?.totalMarginRequired > 0 && (
         <div className="card p-4 space-y-4">
@@ -367,66 +430,6 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5 }) {
         </div>
       )}
 
-      {/* Full Width Layout */}
-      <div className="space-y-6">
-        
-        {/* Legs Configurator */}
-        <div className="card p-4">
-          <LiveLegConfigurator 
-            legs={legs}
-            expiryDates={live.data?.expiryDates || []}
-            byExpiry={live.data?.byExpiry || {}}
-            onUpdateLeg={updateLeg}
-            onAddLeg={addLeg}
-            onRemoveLeg={removeLeg}
-            futurePrice={live.data?.futurePrice}
-            fetchExpiry={(exp) => {
-              if (live.data?.symbol && !live.data?.byExpiry?.[exp]) {
-                live.fetchNow(live.data.symbol, { force: false, expiry: exp, futExpiry: targetFutExpiry });
-              }
-            }}
-          />
-        </div>
-
-        {/* Payoff Chart */}
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-[#e6edf3]">Payoff Diagram (Live Data)</h3>
-          </div>
-          {legs.length > 0 ? (
-            <PayoffChart 
-              legs={legs} 
-              globalInputs={globalInputs}
-              spotRangePercent={15} 
-            />
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-[#8b949e] border border-dashed border-[#30363d] rounded">
-              Add legs to see payoff chart
-            </div>
-          )}
-        </div>
-
-        {/* Probabilities and Theta */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="card p-4">
-            <ProbabilityPanel legs={legs} globalInputs={globalInputs} />
-          </div>
-          <div className="card p-4">
-            <ThetaDecayChart legs={legs} globalInputs={globalInputs} />
-          </div>
-        </div>
-
-        {/* Greeks Surface */}
-        <div className="card p-4">
-          <GreeksSurfaceChart legs={legs} globalInputs={globalInputs} spotRangePercent={15} />
-        </div>
-
-        {/* Scenario Heatmap */}
-        <div className="card p-4">
-          <ScenarioHeatmap legs={legs} globalInputs={globalInputs} />
-        </div>
-
-      </div>
     </div>
   );
 }
