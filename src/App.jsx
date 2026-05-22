@@ -55,7 +55,7 @@ export default function App() {
         <ThetaDecaySimulator />
       </div>
       <div style={{ display: activeTab === 'live_strategy' ? 'block' : 'none' }}>
-        <LiveStrategyBuilder live={live} />
+        <LiveStrategyBuilder live={live} riskFreeRate={riskFreeRate} />
       </div>
       <div style={{ display: activeTab === 'strategies' ? 'block' : 'none' }}>
         <OptionsStrategies 
