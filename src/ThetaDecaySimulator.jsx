@@ -1006,6 +1006,31 @@ export default function ThetaDecaySimulator() {
     }
   }, [optionType, strikePrice]);
 
+  // When user picks a different expiry from dropdown
+  const handleChainExpiryChange = useCallback((newExpiryISO) => {
+    setExpiryDate(newExpiryISO);
+    const chain = live.data;
+    if (chain && chain.expiryDates) {
+      const nseExpiry = chain.expiryDates.find(d => nseToISODate(d) === newExpiryISO);
+      if (nseExpiry) {
+        const strikes = chain.byExpiry?.[nseExpiry] || [];
+        setChainStrikes(strikes);
+        
+        let targetStrike = null;
+        if (strikePrice > 0) targetStrike = strikes.find(s => s.strikePrice === strikePrice);
+        if (!targetStrike) targetStrike = findATMStrike(chain, nseExpiry, chain.spot);
+        
+        if (targetStrike) {
+          setStrikePrice(targetStrike.strikePrice);
+          const relevantIV = optionType === 'CALL' ? targetStrike.call?.iv : targetStrike.put?.iv;
+          if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
+          const ltp = optionType === 'CALL' ? targetStrike.call?.ltp : targetStrike.put?.ltp;
+          if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
+        }
+      }
+    }
+  }, [live.data, strikePrice, optionType]);
+
   // When user picks a different strike from chain dropdown, update IV + market premium
   const handleChainStrikeChange = useCallback((newStrike) => {
     setStrikePrice(newStrike);
@@ -1162,7 +1187,25 @@ export default function ThetaDecaySimulator() {
           {/* Expiry */}
           <div className="flex-1 min-w-[140px]">
             <label className="block text-xs font-medium text-[#e6edf3] mb-1">Expiry Date</label>
-            <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
+            {live.data?.expiryDates?.length > 0 ? (
+              <select
+                value={expiryDate}
+                onChange={(e) => handleChainExpiryChange(e.target.value)}
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] focus:border-[#58a6ff] focus:outline-none"
+              >
+                {live.data.expiryDates.map(exp => (
+                  <option key={exp} value={nseToISODate(exp)}>{exp}</option>
+                ))}
+              </select>
+            ) : (
+              <select
+                value={expiryDate}
+                onChange={(e) => setExpiryDate(e.target.value)}
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] focus:border-[#58a6ff] focus:outline-none"
+              >
+                <option value={expiryDate}>{expiryDate}</option>
+              </select>
+            )}
             <span className="text-[10px] text-[#8b949e] mt-0.5 block">
               {calendarDays > 0 ? `${calendarDays} calendar days` : 'Expired'}
             </span>

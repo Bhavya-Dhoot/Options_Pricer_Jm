@@ -331,12 +331,14 @@ export default function OptionsPricer() {
                 ))}
               </select>
             ) : (
-              <input
+              <select
                 id="input-expiry"
-                type="date"
                 value={expiryDate}
                 onChange={(e) => setExpiryDate(e.target.value)}
-              />
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] focus:border-[#58a6ff] focus:outline-none"
+              >
+                <option value={expiryDate}>{expiryDate}</option>
+              </select>
             )}
             <span className="text-[10px] text-[#8b949e] mt-0.5 block">
               {calendarDays > 0 ? `${calendarDays} calendar days (${tradingDays} trading) remaining` : 'Expired'}
