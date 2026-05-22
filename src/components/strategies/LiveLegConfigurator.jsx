@@ -34,7 +34,7 @@ export default function LiveLegConfigurator({ legs, availableStrikes = [], onUpd
                   <select 
                     value={leg.action} 
                     onChange={e => onUpdateLeg(leg.id, { action: e.target.value })}
-                    className={`bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold focus:outline-none ${getBadgeColor(leg.type, leg.action)}`}
+                    className={`bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold focus:outline-none min-w-[50px] ${getBadgeColor(leg.type, leg.action)}`}
                   >
                     <option value="buy">Buy</option>
                     <option value="sell">Sell</option>
@@ -42,7 +42,7 @@ export default function LiveLegConfigurator({ legs, availableStrikes = [], onUpd
                   <select 
                     value={leg.type} 
                     onChange={e => onUpdateLeg(leg.id, { type: e.target.value })}
-                    className="bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold text-[#e6edf3] focus:outline-none"
+                    className="bg-[#0d1117] border border-[#30363d] rounded px-1 py-1 text-[10px] uppercase font-bold text-[#e6edf3] focus:outline-none min-w-[70px]"
                   >
                     <option value="call">Call</option>
                     <option value="put">Put</option>

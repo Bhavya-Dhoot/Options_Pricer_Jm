@@ -109,11 +109,18 @@ export default function LiveStrategyBuilder({ live }) {
       const updated = { ...l, ...updates };
       
       // Auto-bind premium if strike or type changes
-      if (updates.strike || updates.type) {
+      if (updates.strike !== undefined || updates.type !== undefined) {
         if (updated.type === 'future') {
           updated.premium = live.data?.futurePrice || live.data?.spot || 0;
           updated.strike = 0; // Futures don't have a strike
-        } else if (live.data?.strikeRecords && updated.strike) {
+        } else if (live.data?.strikeRecords) {
+          // If switching from Future to Option, assign an ATM strike
+          if (updated.strike === 0) {
+            const defaultStrike = live.data?.spot 
+              ? Math.round(live.data.spot / 50) * 50 
+              : 24500;
+            updated.strike = defaultStrike;
+          }
           const strikeData = live.data.strikeRecords.find(s => s.strike === updated.strike);
           if (strikeData) {
             updated.premium = updated.type === 'call' ? (strikeData.call?.ltp || 0) : (strikeData.put?.ltp || 0);
