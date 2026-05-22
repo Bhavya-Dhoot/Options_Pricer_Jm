@@ -3,7 +3,14 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
-import { initScripMaster, getUnderlyingToken, getAvailableExpiries, getOptionTokens, getFutureToken } from './scripMaster.js';
+import { 
+  initScripMaster, 
+  getUnderlyingToken, 
+  getOptionTokens, 
+  getAvailableExpiries, 
+  getFutureToken,
+  getAvailableFutureExpiries 
+} from './scripMaster.js';
 import { solveImpliedIV } from '../src/bsm.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,6 +46,8 @@ let cache = {
 app.get('/api/option-chain', async (req, res) => {
   const symbol = req.query.symbol?.toUpperCase() || 'NIFTY';
   const force = req.query.force === 'true';
+  const targetExpiry = req.query.optExpiry || req.query.expiry;
+  const futureExpiry = req.query.futExpiry;
 
   console.log(`[/api/option-chain] Request for ${symbol}`);
 
@@ -75,19 +84,10 @@ app.get('/api/option-chain', async (req, res) => {
       return res.status(404).json({ error: `No expiries found for ${symbol}` });
     }
     
-    let targetExpiry = expiries[0]; // Default to nearest
+    const finalTargetExpiry = targetExpiry || expiries[0];
     
-    if (req.query.expiry) {
-      // The frontend sends in DD-MMM-YYYY format (e.g., "26-May-2026")
-      // We need to convert it to DDMMMYYYY format for scripMaster lookup (e.g., "26MAY2026")
-      const requestedNfoFormat = req.query.expiry.replace(/-/g, '').toUpperCase();
-      if (expiries.includes(requestedNfoFormat)) {
-        targetExpiry = requestedNfoFormat;
-      }
-    }
-
     // 3. Find Options Tokens around Spot
-    const optionsForExpiry = getOptionTokens(symbol, targetExpiry);
+    const optionsForExpiry = getOptionTokens(symbol, finalTargetExpiry);
     
     // Sort by strike distance to spot to get the nearest strikes
     const optionsWithStrike = optionsForExpiry.map(opt => ({
@@ -125,10 +125,12 @@ app.get('/api/option-chain', async (req, res) => {
     const tokensToFetch = [];
     const tokenMap = new Map(); // token -> { strike, type }
 
-    const futureToken = getFutureToken(symbol, targetExpiry);
-    if (futureToken) {
-      tokensToFetch.push(futureToken);
-      tokenMap.set(futureToken, { type: 'FUT' });
+    // Use futureExpiry if provided, else fallback to targetExpiry
+    const futExpTarget = futureExpiry || finalTargetExpiry;
+    const futureTokenObj = getFutureToken(symbol, futExpTarget);
+    if (futureTokenObj) {
+      tokensToFetch.push(futureTokenObj);
+      tokenMap.set(futureTokenObj, { type: 'FUT' });
     }
 
     relevantStrikes.forEach(k => {
@@ -181,7 +183,7 @@ app.get('/api/option-chain', async (req, res) => {
       return `${day}-${formattedMonth}-${year}`;
     };
 
-    const nseTargetExpiry = formatExpiry(targetExpiry);
+    const nseTargetExpiry = formatExpiry(finalTargetExpiry);
     const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
     const parts = nseTargetExpiry.split('-');
     const expiryDateObj = new Date(parseInt(parts[2]), months[parts[1]], parseInt(parts[0]));
@@ -255,8 +257,9 @@ app.get('/api/option-chain', async (req, res) => {
 app.get('/api/expiries', (req, res) => {
   try {
     const symbol = req.query.symbol || 'NIFTY';
-    const expiries = getAvailableExpiries(symbol);
-    
+    const optExpiries = getAvailableExpiries(symbol);
+    const futExpiries = getAvailableFutureExpiries(symbol);
+
     const formatExpiry = (angelExp) => {
       if (!angelExp || angelExp.length < 9) return angelExp;
       const day = angelExp.slice(0, 2);
@@ -266,7 +269,11 @@ app.get('/api/expiries', (req, res) => {
       return `${day}-${formattedMonth}-${year}`;
     };
 
-    res.json({ expiries: expiries.map(formatExpiry) });
+    res.json({ 
+      expiries: optExpiries.map(formatExpiry),
+      optExpiries: optExpiries.map(formatExpiry), 
+      futExpiries: futExpiries.map(formatExpiry) 
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

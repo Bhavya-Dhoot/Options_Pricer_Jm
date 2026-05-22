@@ -9,16 +9,20 @@ import { AlertCircle } from 'lucide-react';
 export default function LiveStrategyBuilder({ live }) {
   const [legs, setLegs] = useState([]);
   const [targetExpiry, setTargetExpiry] = useState('');
+  const [targetFutExpiry, setTargetFutExpiry] = useState('');
   
   // Custom hook to fetch expiries
-  const expiries = useAvailableExpiries(live.data?.symbol || 'NIFTY') || [];
-  const isExpiriesLoading = expiries.length === 0;
+  const { optExpiries = [], futExpiries = [] } = useAvailableExpiries(live.data?.symbol || 'NIFTY') || {};
+  const isExpiriesLoading = optExpiries.length === 0;
 
   useEffect(() => {
-    if (expiries.length > 0 && !targetExpiry) {
-      setTargetExpiry(expiries[0]);
+    if (optExpiries.length > 0 && !targetExpiry) {
+      setTargetExpiry(optExpiries[0]);
     }
-  }, [expiries, targetExpiry]);
+    if (futExpiries.length > 0 && !targetFutExpiry) {
+      setTargetFutExpiry(futExpiries[0]);
+    }
+  }, [optExpiries, futExpiries, targetExpiry, targetFutExpiry]);
 
   // When live data updates, bind the exact premiums to the legs
   useEffect(() => {
@@ -47,18 +51,26 @@ export default function LiveStrategyBuilder({ live }) {
 
   const handleFetch = async (symbol) => {
     // When they click fetch, fetch the specific expiry
-    if (targetExpiry) {
-      await live.fetchNow(symbol, { force: true, expiry: targetExpiry });
-    } else {
-      await live.fetchNow(symbol, { force: true });
-    }
+    await live.fetchNow(symbol, { 
+      force: true, 
+      expiry: targetExpiry || null,
+      futExpiry: targetFutExpiry || null
+    });
   };
 
   const handleExpiryChange = (e) => {
     const newExp = e.target.value;
     setTargetExpiry(newExp);
     if (live.data?.symbol) {
-      live.fetchNow(live.data.symbol, { force: false, expiry: newExp });
+      live.fetchNow(live.data.symbol, { force: false, expiry: newExp, futExpiry: targetFutExpiry });
+    }
+  };
+
+  const handleFutExpiryChange = (e) => {
+    const newExp = e.target.value;
+    setTargetFutExpiry(newExp);
+    if (live.data?.symbol) {
+      live.fetchNow(live.data.symbol, { force: false, expiry: targetExpiry, futExpiry: newExp });
     }
   };
 
@@ -157,24 +169,46 @@ export default function LiveStrategyBuilder({ live }) {
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
         <LiveFetchBar onFetch={handleFetch} isLoading={live.isLoading} error={live.error} />
         
-        <div className="flex flex-col gap-2 min-w-[200px]">
-          <label className="text-[10px] text-[#8b949e] uppercase font-bold tracking-wider">Target Expiry</label>
-          <select 
-            value={targetExpiry}
-            onChange={handleExpiryChange}
-            disabled={isExpiriesLoading}
-            className="bg-[#0d1117] border border-[#30363d] text-[#e6edf3] text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#58a6ff] focus:border-transparent outline-none"
-          >
-            {isExpiriesLoading ? (
-              <option value="">Loading...</option>
-            ) : expiries.length > 0 ? (
-              expiries.map(exp => (
-                <option key={exp} value={exp}>{exp}</option>
-              ))
-            ) : (
-              <option value="">No expiries available</option>
-            )}
-          </select>
+        <div className="flex gap-4">
+          <div className="flex flex-col gap-2 min-w-[160px]">
+            <label className="text-[10px] text-[#8b949e] uppercase font-bold tracking-wider">Target Options Expiry</label>
+            <select 
+              value={targetExpiry}
+              onChange={handleExpiryChange}
+              disabled={isExpiriesLoading}
+              className="bg-[#0d1117] border border-[#30363d] text-[#e6edf3] text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#58a6ff] focus:border-transparent outline-none"
+            >
+              {isExpiriesLoading ? (
+                <option value="">Loading...</option>
+              ) : optExpiries.length > 0 ? (
+                optExpiries.map(exp => (
+                  <option key={exp} value={exp}>{exp}</option>
+                ))
+              ) : (
+                <option value="">No options expiries</option>
+              )}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2 min-w-[160px]">
+            <label className="text-[10px] text-purple-400 uppercase font-bold tracking-wider">Target Futures Expiry</label>
+            <select 
+              value={targetFutExpiry}
+              onChange={handleFutExpiryChange}
+              disabled={isExpiriesLoading}
+              className="bg-[#0d1117] border border-[#30363d] text-[#e6edf3] text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-400 focus:border-transparent outline-none"
+            >
+              {isExpiriesLoading ? (
+                <option value="">Loading...</option>
+              ) : futExpiries.length > 0 ? (
+                futExpiries.map(exp => (
+                  <option key={exp} value={exp}>{exp}</option>
+                ))
+              ) : (
+                <option value="">No futures expiries</option>
+              )}
+            </select>
+          </div>
         </div>
       </div>
 

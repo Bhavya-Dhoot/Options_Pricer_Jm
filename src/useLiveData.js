@@ -34,14 +34,15 @@ export function useLiveData() {
   const [isLive, setIsLive] = useState(false);
   const intervalRef = useRef(null);
 
-  const fetchNow = useCallback(async (symbol = 'NIFTY', { force = true, expiry = null } = {}) => {
+  const fetchNow = useCallback(async (symbol = 'NIFTY', { force = true, expiry = null, futExpiry = null } = {}) => {
     setIsLoading(true);
     setError(null);
 
     try {
       const params = new URLSearchParams({ symbol });
       if (force) params.set('force', 'true');
-      if (expiry) params.set('expiry', expiry);
+      if (expiry) params.set('optExpiry', expiry);
+      if (futExpiry) params.set('futExpiry', futExpiry);
 
       const res = await fetch(`${API_BASE}/option-chain?${params}`, {
         cache: 'no-store',                    // bypass browser HTTP cache
@@ -108,15 +109,19 @@ export function useLiveData() {
 }
 
 export function useAvailableExpiries(symbol = 'NIFTY') {
-  const [expiries, setExpiries] = useState([]);
+  const [optExpiries, setOptExpiries] = useState([]);
+  const [futExpiries, setFutExpiries] = useState([]);
   
   useEffect(() => {
     let mounted = true;
     fetch(`${API_BASE}/expiries?symbol=${symbol}`)
       .then(res => res.json())
       .then(data => {
-        if (mounted && data.expiries) {
-          setExpiries(data.expiries);
+        if (mounted) {
+          if (data.optExpiries) setOptExpiries(data.optExpiries);
+          else if (data.expiries) setOptExpiries(data.expiries); // backwards compatibility
+          
+          if (data.futExpiries) setFutExpiries(data.futExpiries);
         }
       })
       .catch(err => console.error('Failed to fetch expiries:', err));
@@ -124,7 +129,7 @@ export function useAvailableExpiries(symbol = 'NIFTY') {
     return () => { mounted = false; };
   }, [symbol]);
 
-  return expiries;
+  return { optExpiries, futExpiries };
 }
 
 /**

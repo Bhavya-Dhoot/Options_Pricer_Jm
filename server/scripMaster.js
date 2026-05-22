@@ -83,3 +83,19 @@ export function getAvailableExpiries(symbol) {
 
   return Array.from(expiries).sort((a, b) => parseDate(a) - parseDate(b));
 }
+
+export function getAvailableFutureExpiries(symbol) {
+  const futures = nfoMaster.filter(s => s.name === symbol && s.instrumenttype.startsWith('FUT'));
+  const expiries = new Set(futures.map(s => s.expiry));
+  
+  const parseDate = (dStr) => {
+    if (!dStr) return 0;
+    const day = parseInt(dStr.slice(0, 2), 10);
+    const monthStr = dStr.slice(2, 5);
+    const year = parseInt(dStr.slice(5), 10);
+    const months = { JAN:0, FEB:1, MAR:2, APR:3, MAY:4, JUN:5, JUL:6, AUG:7, SEP:8, OCT:9, NOV:10, DEC:11 };
+    return new Date(year, months[monthStr], day).getTime();
+  };
+
+  return Array.from(expiries).sort((a, b) => parseDate(a) - parseDate(b));
+}

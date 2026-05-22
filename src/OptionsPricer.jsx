@@ -40,7 +40,7 @@ export default function OptionsPricer() {
   const [copied, setCopied] = useState(false);
 
   const live = useLiveData();
-  const availableExpiries = useAvailableExpiries('NIFTY');
+  const { optExpiries: availableExpiries = [] } = useAvailableExpiries('NIFTY');
 
   const handleDataFetched = useCallback((chain, sym) => {
     if (!chain) return;
