@@ -235,7 +235,12 @@ export default function LiveStrategyBuilder({ live }) {
             {legs.length > 0 ? (
               <PayoffChart 
                 legs={legs} 
-                spotPrice={live.data?.spot || 24500} 
+                globalInputs={{ 
+                  spot: live.data?.spot || 24500, 
+                  iv: live.data?.iv || 15, 
+                  rate: 6.5, 
+                  dividend: 0 
+                }}
                 spotRangePercent={15} 
               />
             ) : (
