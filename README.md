@@ -14,14 +14,19 @@ To comply with strict broker API limits (10 requests per second) while supportin
 - It features a **Dynamic Priority Guarantee**: If a user is actively paper trading or an admin is viewing live trades, their symbols are elevated to the High Priority Queue, scaling smoothly up to a 100% API allocation ratio based on load.
 - **Memory & Bandwidth Garbage Collection**: Active symbols are tracked by their last request time. If a symbol hasn't been accessed in 10 minutes and is not part of an active portfolio, the `priceCache` microservice dynamically prunes it, preventing bandwidth leaks and avoiding IP bans.
 
-### 🛡️ Holistic Spread Margin Engine
-Instead of checking margins on a leg-by-leg basis (which destroys margin benefits), the backend employs a **Batch Trading & Holistic Margin Engine**. When users submit complex setups (like Iron Condors or Butterfly Spreads), the system mathematically pairs short options with offsetting long hedges *before* executing the database transactions. This limits the required margin to the precise maximum loss of the spread instead of the combined naked margin.
+### 🛡️ Institutional-Grade Margin Engine (SPAN Offsets)
+Instead of simply summing the naked margins for complex positions, the backend features a comprehensive SPAN-like **Holistic Margin Engine**. It mathematically processes multi-leg setups (like Iron Condors or Butterfly Spreads) through rigorous directional risk hierarchies:
+- **Debit Spread Zeroing:** Fully offsets the short-leg penalty if fully covered by a deeper ITM long leg.
+- **Cross-Asset Covered Strategies:** Seamlessly offsets Naked Options margin when fully protected by Long or Short Futures (e.g., Covered Calls require 0 additional option margin).
+- **Opposing Risk Offsets:** Automatically detects mutually exclusive expiration structures (like Iron Condors) and charges margin strictly on the **Maximum** of the two wings (`Math.max(callRisk, putRisk)`), drastically reducing margin bloat.
+- **Strict Expiry Enforcement:** Rejects false calendar hedge offsets by strictly parsing `longLeg.expiry >= shortLeg.expiry`.
 
 ### 🧱 Atomic Concurrency Data Layer
 For the Paper Trading portfolio, the backend completely abandons standard `document.save()` ORM patterns which suffer from race conditions. Instead, it leverages MongoDB atomic `$inc` operators (`findOneAndUpdate({ $inc: ... })`) to process real-time PnL modifications and capital updates. This guarantees zero race-conditions or mathematical drift when hundreds of trades are closed concurrently.
 
-### 📈 Probability of Profit (POP) via Lognormal Integration
+### 📈 Lognormal Probability Engine & Absolute Boundary Defenses
 Instead of basic standard-deviation approximations, the Probability Engine uses a full **Lognormal PDF Integration** derived from the BSM model. It computes the risk-neutral drift `(r - q - σ²/2)` and standard deviation `σ√T`, then numerically integrates the probability mass function across the entire range of profitable intrinsic values at expiry.
+To ensure mathematical perfection across edge-cases, the engine includes strict **Float Clamping `[0.0, 1.0]`** to prevent JS floating-point overlaps from rendering >100% probabilities, and a rigorous **Absolute Downside Injection (`Spot = 0`)** during Max Loss charting to guarantee flawless risk calculation for Naked Short Puts and Long Futures.
 
 ### ⚡ Unified Paper Trading Terminal
 The Strategy Builder is deeply integrated into the Paper Trading Dashboard. Unauthenticated users get a pure mathematical sandbox, while authenticated users can save custom templates, utilize 1-click strategy generation (Straddles, Spreads, Condors), and execute virtual trades seamlessly into a MongoDB portfolio with real-time MTM (Mark-To-Market) tracking.
@@ -63,6 +68,7 @@ The Angel One API restricts payloads to 50 tokens per request and limits executi
 
 ### ⏱️ Theta Decay Simulator
 - **Dual decay curves** — BSM theoretical value decay vs. market-implied decay.
+- **Continuous Cost of Carry** — Visual T+0 lines correctly model Future decay via continuous compounding (`F = S * e^(r-q)T`).
 - **Daily theta breakdown** — shows daily theta loss with acceleration zones (Safe, Warning, Danger).
 - **P&L Scenario Heatmap** — Dynamic matrix displaying spot price change vs. specific days to expiry.
 
