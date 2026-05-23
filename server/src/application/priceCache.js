@@ -28,6 +28,17 @@ export const getLatestPrice = (symbol) => {
   return priceCache[symbol.toUpperCase()] || null;
 };
 
+export const forceFetchLatestPrice = async (symbol) => {
+  const sym = symbol.toUpperCase();
+  const data = await fetchMarketDataChain(sym, null, null);
+  priceCache[sym] = {
+    data: data,
+    timestamp: Date.now()
+  };
+  lastPolledTime[sym] = Date.now();
+  return priceCache[sym];
+};
+
 let pIndex = 0;
 let rIndex = 0;
 let reqCount = 0;
@@ -57,30 +68,31 @@ export const startPriceCacheLoop = () => {
       let targetSymbol = null;
       reqCount++;
 
-      // Rule: Every 3rd request (1 out of 3) is dedicated to Priority Queue
-      if (reqCount % 3 === 0) {
-        if (pQueue.length > 0) {
-          pIndex = (pIndex + 1) % pQueue.length;
-          targetSymbol = pQueue[pIndex];
-        } else if (rQueue.length > 0) {
-          rIndex = (rIndex + 1) % rQueue.length;
-          targetSymbol = rQueue[rIndex];
-        }
-      } else {
-        // The other 2 out of 3 requests go to Regular Queue
-        if (rQueue.length > 0) {
-          rIndex = (rIndex + 1) % rQueue.length;
-          targetSymbol = rQueue[rIndex];
-        } else if (pQueue.length > 0) {
-          pIndex = (pIndex + 1) % pQueue.length;
-          targetSymbol = pQueue[pIndex];
-        }
+      // Dynamic Ratio: Increase priority intensity if there are many priority symbols
+      let ratio = 3; // default 1 priority out of every 3
+      if (pQueue.length > 0 && rQueue.length > 0) {
+        if (pQueue.length >= rQueue.length) ratio = 2; // 1 out of 2
+        if (pQueue.length >= rQueue.length * 3) ratio = 1; // 100% priority
       }
+
+      const isPriorityTurn = pQueue.length > 0 && (rQueue.length === 0 || reqCount % ratio === 0 || ratio === 1);
+
+      if (isPriorityTurn) {
+        pIndex = (pIndex + 1) % pQueue.length;
+        targetSymbol = pQueue[pIndex];
+      } else if (rQueue.length > 0) {
+        rIndex = (rIndex + 1) % rQueue.length;
+        targetSymbol = rQueue[rIndex];
+      }
+
+      let delayForNext = 900; // Base sustainable rate to protect 5000/hr limit
 
       if (targetSymbol) {
         const now = Date.now();
+        const timeSinceLast = now - (lastPolledTime[targetSymbol] || 0);
+        
         // Prevent polling the identical symbol faster than 1000ms to save API quota
-        if (!lastPolledTime[targetSymbol] || (now - lastPolledTime[targetSymbol] >= 1000)) {
+        if (timeSinceLast >= 1000) {
           lastPolledTime[targetSymbol] = now;
           
           const data = await fetchMarketDataChain(targetSymbol, null, null);
@@ -101,14 +113,22 @@ export const startPriceCacheLoop = () => {
             }).catch(e => console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message));
           }
         }
+        } else {
+          // Request was skipped because it's too fresh! NO quota consumed.
+          // Don't punish the background loop with a 900ms delay if we didn't hit the API.
+          // Just wait the exact remaining time to unlock it (or 50ms if many symbols are waiting).
+          const remainingWait = 1000 - timeSinceLast;
+          delayForNext = (pQueue.length + rQueue.length > 1) ? 50 : Math.max(10, remainingWait);
+        }
+      } else {
+        delayForNext = 1000; // No symbols in queue
       }
     } catch (err) {
       console.error(`[PriceCache] Fetch Error: ${err.message}`);
     } finally {
-      // Throttle the daemon to exactly 900ms per request.
-      // 1 req / 900ms = 4000 requests per hour.
-      // This strictly reserves 1000 requests per hour (20% of the quota) exclusively for UI bursts!
-      setTimeout(fetchLoop, 900);
+      // Throttle the daemon to strictly protect the 5000/hr quota, but dynamically 
+      // speed up if the request was skipped to prevent artificial latency!
+      setTimeout(fetchLoop, delayForNext);
     }
   };
 

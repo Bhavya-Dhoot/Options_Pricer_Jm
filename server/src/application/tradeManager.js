@@ -1,6 +1,6 @@
 import Trade from '../domain/Trade.js';
 import User from '../domain/User.js';
-import { getLatestPrice, registerSymbol } from './priceCache.js';
+import { getLatestPrice, registerSymbol, forceFetchLatestPrice } from './priceCache.js';
 import { getLotSize } from '../../scripMaster.js';
 import { estimateMargin } from '../domain/marginCalculator.js';
 
@@ -20,7 +20,17 @@ export const placeTrade = async (req, res) => {
     let verifiedEntryPrice = 0;
     
     if (orderType === 'market') {
-      const liveData = getLatestPrice(symbol);
+      let liveData = getLatestPrice(symbol);
+      
+      // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
+      if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
+        try {
+          liveData = await forceFetchLatestPrice(symbol);
+        } catch (e) {
+          console.warn(`[TradeManager] Force fetch failed for ${symbol}, using cache fallback.`, e.message);
+        }
+      }
+
       if (!liveData || !liveData.data) {
         return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
       }
@@ -119,8 +129,18 @@ export const placeBatchTrades = async (req, res) => {
     const verifiedLegs = [];
     const symbol = legs[0].symbol || 'NIFTY'; // Assume same symbol
     registerSymbol(symbol);
-    const liveData = getLatestPrice(symbol);
     
+    let liveData = getLatestPrice(symbol);
+    
+    // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
+    if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
+      try {
+        liveData = await forceFetchLatestPrice(symbol);
+      } catch (e) {
+        console.warn(`[TradeManager] Force fetch failed for ${symbol}, using cache fallback.`, e.message);
+      }
+    }
+
     if (!liveData || !liveData.data) {
       return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
     }

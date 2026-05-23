@@ -155,12 +155,21 @@ const processQueue = async () => {
     const { endpoint, requestFn, resolve, reject } = requestQueue.shift();
     endpointTimestamps.get(endpoint).push(Date.now());
     
-    try {
-      const result = await requestFn();
-      resolve(result);
-    } catch (error) {
-      reject(error);
-    }
+    // Smoothly space out requests to prevent socket flooding or triggering micro-burst limits
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    // Fire asynchronously to maximize throughput without waiting for network RTT
+    requestFn()
+      .then(result => resolve(result))
+      .catch(error => {
+        // Simple Circuit Breaker / Throttle Backoff log
+        if (error.response?.status === 429 || error.response?.data?.errorCode === 'AB4030') {
+          console.warn(`[AngelOne] Rate limit / AB4030 hit on ${endpoint}. Throttle kicking in.`);
+          // Artificially inject a penalty timestamp to slow down the queue
+          endpointTimestamps.get(endpoint).push(Date.now() + 5000); 
+        }
+        reject(error);
+      });
   }
 
   isProcessingQueue = false;

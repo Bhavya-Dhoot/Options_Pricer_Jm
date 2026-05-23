@@ -3,7 +3,6 @@ import cors from 'cors';
 import compression from 'compression';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import mongoSanitize from 'express-mongo-sanitize';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
@@ -45,7 +44,25 @@ app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http:
 
 // Security Optimization: Payload limits & NoSQL Injection protection
 app.use(express.json({ limit: '10kb' }));
-app.use(mongoSanitize());
+
+// Custom NoSQL Sanitizer for Express 5 (where req.query is read-only)
+app.use((req, res, next) => {
+  const sanitize = (obj) => {
+    if (typeof obj !== 'object' || obj === null) return;
+    for (let key in obj) {
+      if (key.startsWith('$') || key.includes('.')) {
+        delete obj[key];
+      } else {
+        sanitize(obj[key]);
+      }
+    }
+  };
+  sanitize(req.body);
+  sanitize(req.params);
+  // Do not reassign req.query, just mutate the object directly if needed
+  if (req.query) sanitize(req.query);
+  next();
+});
 
 // Security Optimization: Inbound Rate Limiting
 const authLimiter = rateLimit({
@@ -99,6 +116,16 @@ let cache = {
   symbol: null
 };
 
+// Helper to format Angel One expiry strings (e.g. 26MAY2026 -> 26-May-2026)
+export function formatExpiry(angelExp) {
+  if (!angelExp || angelExp.length < 9) return angelExp;
+  const day = angelExp.slice(0, 2);
+  const month = angelExp.slice(2, 5);
+  const year = angelExp.slice(5);
+  const formattedMonth = month.charAt(0) + month.slice(1).toLowerCase();
+  return `${day}-${formattedMonth}-${year}`;
+}
+
 export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
   symbol = symbol?.toUpperCase() || 'NIFTY';
   
@@ -130,10 +157,12 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       return res.status(404).json({ error: `No expiries found for ${symbol}` });
     }
     
-    const finalTargetExpiry = targetExpiry || expiries[0];
+    const finalTargetExpiryFormatted = targetExpiry || formatExpiry(expiries[0]);
+    // Find the raw Angel expiry string that matches the formatted one
+    const finalTargetExpiryRaw = expiries.find(e => formatExpiry(e) === finalTargetExpiryFormatted) || expiries[0];
     
     // 3. Find Options Tokens around Spot
-    const optionsForExpiry = getOptionTokens(symbol, finalTargetExpiry);
+    const optionsForExpiry = getOptionTokens(symbol, finalTargetExpiryRaw);
     
     const optionsWithStrike = optionsForExpiry.map(opt => ({
       ...opt,
@@ -224,16 +253,7 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
     });
 
     // 5. Construct NSE-like Response
-    const formatExpiry = (angelExp) => {
-      if (!angelExp || angelExp.length < 9) return angelExp;
-      const day = angelExp.slice(0, 2);
-      const month = angelExp.slice(2, 5);
-      const year = angelExp.slice(5);
-      const formattedMonth = month.charAt(0) + month.slice(1).toLowerCase();
-      return `${day}-${formattedMonth}-${year}`;
-    };
-
-    const futExpTarget = futureExpiry || finalTargetExpiry;
+    const futExpTarget = futureExpiry || finalTargetExpiryRaw;
     const futExpTargetFormat = formatExpiry(futExpTarget);
     
     // Map fetched options by token for fast lookup
@@ -254,20 +274,26 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       }
     });
 
-    const nseTargetExpiry = formatExpiry(finalTargetExpiry);
+    const nseTargetExpiry = formatExpiry(finalTargetExpiryRaw);
     const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
     const parts = nseTargetExpiry.split('-');
     const expiryDateObj = new Date(parseInt(parts[2]), months[parts[1]], parseInt(parts[0]));
     
     const T = Math.max(0.5, (expiryDateObj.getTime() - Date.now()) / 86400000) / 365;
 
-    const getFairPrice = (quote, bestBuy, bestSell) => {
-      const bid = bestBuy?.price || 0;
-      const ask = bestSell?.price || 0;
-      if (bid > 0 && ask > 0) return (bid + ask) / 2;
-      if (bid > 0) return bid;
-      if (ask > 0) return ask;
-      return quote.ltp;
+    // Helper: Find "true" LTP. Angel One LTP is often extremely stale (e.g., 157 when bid/ask is 182).
+    const getTrueLtp = (quote) => {
+      const bid = quote.depth?.buy?.[0]?.price || 0;
+      const ask = quote.depth?.sell?.[0]?.price || 0;
+      let ltp = quote.ltp;
+      
+      // If order book is active but LTP is outside the spread, it's stale. Use mid-price.
+      if (bid > 0 && ask > 0 && ask >= bid) {
+        if (ltp < bid || ltp > ask) {
+          ltp = (bid + ask) / 2;
+        }
+      }
+      return ltp;
     };
 
     const strikeRecords = relevantStrikes.map(strike => {
@@ -282,20 +308,19 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       if (ceQuote) {
         const bestBuy = ceQuote.depth?.buy?.[0];
         const bestSell = ceQuote.depth?.sell?.[0];
-        const fairPrice = getFairPrice(ceQuote, bestBuy, bestSell);
+        const trueLtp = getTrueLtp(ceQuote);
         
         let prevCalcIV = ivCache.get(ceToken) || 0.20;
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, fairPrice, 'CALL', 0.012, prevCalcIV) || 0.15;
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, trueLtp, 'CALL', 0.012, prevCalcIV) || 0.15;
         ivCache.set(ceToken, calcIV);
         
         record.call = {
-          ltp: ceQuote.ltp,
+          ltp: trueLtp,
           oi: ceQuote.openInterest,
           bidPrice: bestBuy?.price || 0,
           bidQty: bestBuy?.quantity || 0,
           askPrice: bestSell?.price || 0,
           askQty: bestSell?.quantity || 0,
-          markPrice: fairPrice,
           iv: calcIV * 100 
         };
       }
@@ -303,20 +328,19 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       if (peQuote) {
         const bestBuy = peQuote.depth?.buy?.[0];
         const bestSell = peQuote.depth?.sell?.[0];
-        const fairPrice = getFairPrice(peQuote, bestBuy, bestSell);
+        const trueLtp = getTrueLtp(peQuote);
 
         let prevCalcIV = ivCache.get(peToken) || 0.20;
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, fairPrice, 'PUT', 0.012, prevCalcIV) || 0.15;
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, trueLtp, 'PUT', 0.012, prevCalcIV) || 0.15;
         ivCache.set(peToken, calcIV);
 
         record.put = {
-          ltp: peQuote.ltp,
+          ltp: trueLtp,
           oi: peQuote.openInterest,
           bidPrice: bestBuy?.price || 0,
           bidQty: bestBuy?.quantity || 0,
           askPrice: bestSell?.price || 0,
           askQty: bestSell?.quantity || 0,
-          markPrice: fairPrice,
           iv: calcIV * 100
         };
       }
@@ -366,15 +390,6 @@ app.get('/api/expiries', (req, res) => {
     const symbol = req.query.symbol || 'NIFTY';
     const optExpiries = getAvailableExpiries(symbol);
     const futExpiries = getAvailableFutureExpiries(symbol);
-
-    const formatExpiry = (angelExp) => {
-      if (!angelExp || angelExp.length < 9) return angelExp;
-      const day = angelExp.slice(0, 2);
-      const month = angelExp.slice(2, 5);
-      const year = angelExp.slice(5);
-      const formattedMonth = month.charAt(0) + month.slice(1).toLowerCase();
-      return `${day}-${formattedMonth}-${year}`;
-    };
 
     res.json({ 
       expiries: optExpiries.map(formatExpiry),

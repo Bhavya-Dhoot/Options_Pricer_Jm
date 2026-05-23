@@ -8,10 +8,10 @@ Built with React 19, Vite 8, Recharts, and a Node.js Express Backend.
 
 ## Intelligent Architectural Decisions
 
-### 🚦 Advanced API Rate Limiting & Garbage Collection
-To comply with strict broker API limits (3 requests per second) while supporting concurrent users, the backend utilizes a sophisticated **Round-Robin Queue Manager**.
-- It guarantees exactly 3 HTTP requests are dispatched per second (1 every 333ms).
-- It features a **1/3 Priority Guarantee**: If a Super User (e.g., admin) queues requests, the manager guarantees that every 3rd request is pulled exclusively from the High Priority Queue, ensuring VIP users never experience bottlenecks from standard traffic.
+### 🚦 Advanced API Rate Limiting & Dynamic Queue Scheduling
+To comply with strict broker API limits (10 requests per second) while supporting concurrent users, the backend utilizes a sophisticated **Dynamic Round-Robin Priority Queue**.
+- It dynamically tracks active API quota remaining and speeds up/slows down polling mathematically to guarantee we stay exactly under 5,000 requests/hour.
+- It features a **Dynamic Priority Guarantee**: If a user is actively paper trading or an admin is viewing live trades, their symbols are elevated to the High Priority Queue, scaling smoothly up to a 100% API allocation ratio based on load.
 - **Memory & Bandwidth Garbage Collection**: Active symbols are tracked by their last request time. If a symbol hasn't been accessed in 10 minutes and is not part of an active portfolio, the `priceCache` microservice dynamically prunes it, preventing bandwidth leaks and avoiding IP bans.
 
 ### 🛡️ Holistic Spread Margin Engine
@@ -121,16 +121,18 @@ Options Pricer/
 | **Deployment** | Docker, Render |
 | **Math** | Pure JavaScript BSM engine, Lognormal Integrator, Newton-Raphson |
 
-### 6. Endpoint-Aware Throttling Engine
+### 6. Endpoint-Aware Throttling & Anti-Burst Protection
 To completely eradicate `403 Access denied` errors without compromising UI responsiveness, the entire API interaction layer routes through a mathematical global queue. 
 Rather than relying on a static delay, it implements an advanced **Endpoint-Aware Sliding Rate Limiter** that algorithmically ensures we never breach any of Angel One's hard limits by tracking sliding windows independently per specific endpoint route:
 - `/quote`: 10/s, 500/m, 5000/h
 - `/getCandleData`: 3/s, 180/m, 5000/h
 
-If any of the three windows (1s, 60s, 3600s) for a specific endpoint hits absolute mathematical capacity, the underlying Promise is paused for the exact nanoseconds required until the oldest token expires. To guarantee UI snappiness, the background polling daemon is permanently throttled to `900ms` (4000 req/hour), strictly reserving 20% of the API quota exclusively for manual UI bursts.
-Furthermore, all state-mutating endpoints (`placeOrder`, `modifyOrder`, `cancelOrder`, etc.) have been completely removed from the router's allowed dictionary, mathematically ensuring that the system is perfectly locked into a fail-safe, read-only Simulation & Strategy Building mode.
+If any of the three windows (1s, 60s, 3600s) for a specific endpoint hits absolute mathematical capacity, the underlying Promise is paused for the exact nanoseconds required until the oldest token expires. To prevent dangerous simultaneous bursts that trigger IP bans, the queue smoothly spaces queued requests by 20ms. Furthermore, if Angel One ever throws a limit warning, the backend instantly trips a circuit breaker, injecting an automatic 5-second penalty cooldown to protect the socket.
 
-### 7. Core CPU Eradication (HTTP Loopback & React Debouncing)
+### 7. Slippage-Free Paper Trade Execution
+To guarantee the highest fidelity during virtual trading, the engine refuses to execute market orders against stale background caches. If the underlying asset's cache is older than 500 milliseconds, the execution layer instantly halts, forcefully bypasses the background daemon, and injects a synchronous `forceFetchLatestPrice` API request to retrieve the absolute real-time tick before committing the paper trade to MongoDB.
+
+### 8. Core CPU Eradication (HTTP Loopback & React Debouncing)
 We eliminated all local TCP/HTTP loopbacks. The background daemon no longer queries its own Express router via `fetch`, but instead imports and natively executes the decoupled `fetchMarketDataChain` function directly at raw V8 engine speed.
 Simultaneously, the frontend features a custom `useDebounce` hook across all Live Strategy configuration sliders. The immensely heavy Black-Scholes 150-step 3D rendering loop is paused until the user stops typing for 300ms, guaranteeing a flawless 60 FPS UI experience.
 
