@@ -10,6 +10,17 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
   const [newCapital, setNewCapital] = useState('');
   const [livePrices, setLivePrices] = useState({});
   const [injectedLegs, setInjectedLegs] = useState([]);
+  const [lastPortfolioUpdate, setLastPortfolioUpdate] = useState(null);
+  const [portfolioTimeSinceUpdate, setPortfolioTimeSinceUpdate] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (lastPortfolioUpdate) {
+        setPortfolioTimeSinceUpdate(Math.floor((Date.now() - lastPortfolioUpdate) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lastPortfolioUpdate]);
 
   useEffect(() => {
     fetchProfileAndTrades();
@@ -32,7 +43,10 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
         const res = await fetch(`/api/trades/live-prices?symbols=${openSymbols.join(',')}${priorityParam}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        if (res.ok) setLivePrices(await res.json());
+        if (res.ok) {
+          setLivePrices(await res.json());
+          setLastPortfolioUpdate(Date.now());
+        }
       } catch (err) {}
     };
 
@@ -157,7 +171,15 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-[#e6edf3]">Paper Trading Portfolio</h2>
-          <p className="text-sm text-[#8b949e]">{profile.username}</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-sm text-[#8b949e]">{profile.username}</p>
+            {lastPortfolioUpdate && (
+              <span className="flex items-center gap-1.5 text-xs text-[#8b949e]" title="Time since your open positions were last updated">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950] animate-pulse" />
+                Portfolio updated {portfolioTimeSinceUpdate}s ago
+              </span>
+            )}
+          </div>
         </div>
         <button onClick={onLogout} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors border border-red-500/20">
           <LogOut size={16} /> Logout

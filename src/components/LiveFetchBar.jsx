@@ -50,6 +50,7 @@ export default function LiveFetchBar({ onFetchComplete }) {
 
         <button
           onClick={() => live.isLive ? live.stopAutoRefresh() : live.startAutoRefresh(30000, symbol.trim().toUpperCase() || 'NIFTY')}
+          title="Auto-refresh Strategy Builder data (Portfolio updates automatically)"
           className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg font-medium transition-all cursor-pointer border ${
             live.isLive
               ? 'border-[#3fb95040] bg-[#3fb95010] text-[#3fb950]'
@@ -69,8 +70,8 @@ export default function LiveFetchBar({ onFetchComplete }) {
           </span>
         )}
         {live.lastUpdate && (
-          <span className="text-[#8b949e]">
-            Updated {timeSinceUpdate}s ago
+          <span className="text-[#8b949e]" title="Time since the strategy builder data was last fetched">
+            Strategy updated {timeSinceUpdate}s ago
           </span>
         )}
         {live.error && (
