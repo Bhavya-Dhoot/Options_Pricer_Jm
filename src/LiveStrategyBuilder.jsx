@@ -135,6 +135,10 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
     };
   }, [live.data, targetExpiry, targetFutExpiry, riskFreeRate]);
 
+  // Apply debouncing to heavy UI chart inputs
+  const debouncedLegs = useDebounce(legs, 300);
+  const debouncedGlobalInputs = useDebounce(globalInputs, 300);
+
   useEffect(() => {
     if (optExpiries.length > 0 && !targetExpiry) {
       setTargetExpiry(optExpiries[0]);
