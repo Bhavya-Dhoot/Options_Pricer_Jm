@@ -162,7 +162,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
       } else if (live.data.byExpiry && leg.expiry) {
         const records = live.data.byExpiry[leg.expiry];
         if (records) {
-          const strikeData = records.find(s => (s.strikePrice || s.strike) === leg.strike);
+          const strikeData = records.find(s => Number(s.strikePrice || s.strike) === Number(leg.strike));
           if (strikeData) {
             const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
             if (optData) {
@@ -243,7 +243,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
     } else if (live.data?.byExpiry && exp) {
       const records = live.data.byExpiry[exp];
       if (records) {
-        const strikeData = records.find(s => (s.strikePrice || s.strike) === defaultStrike);
+        const strikeData = records.find(s => Number(s.strikePrice || s.strike) === Number(defaultStrike));
         if (strikeData) {
           const optData = type === 'call' ? strikeData.call : strikeData.put;
           if (optData) {
@@ -295,7 +295,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
                 : 24500;
               updated.strike = defaultStrike;
             }
-            const strikeData = records.find(s => (s.strikePrice || s.strike) === updated.strike);
+            const strikeData = records.find(s => Number(s.strikePrice || s.strike) === Number(updated.strike));
             if (strikeData) {
               const optData = updated.type === 'call' ? strikeData.call : strikeData.put;
               if (optData) {
@@ -515,7 +515,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
               qty: 1,
               lotSize: getLotSize(live.data?.symbol),
               expiry: targetExpiry || live.data?.expiryDates?.[0],
-              premium: live.data?.spot || 0 // auto-updates from useEffect binding
+              premium: 0 // auto-updates from useEffect binding
             }));
             setLegs(appliedLegs);
           }} 

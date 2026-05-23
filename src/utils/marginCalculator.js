@@ -46,12 +46,10 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
   const shortPuts = legs.filter(l => l.type === 'put' && l.action === 'sell');
   const futures = legs.filter(l => l.type === 'future');
   
-  // 1. Long Options (Margin = Premium Paid)
-  // Options buying requires 100% upfront premium
-  [...longCalls, ...longPuts].forEach(leg => {
-    // If it's used as a hedge for a short, we still pay the premium, but it reduces the short's margin
-    totalMargin += (leg.premium * leg.qty * lotSize);
-  });
+  // 1. Long Options (Premium is paid in cash, NOT held as Margin)
+  // We no longer add leg.premium to totalMargin here, because totalMargin
+  // represents Span + Exposure, which only apply to Short options and Futures.
+  // The net premium is already calculated and displayed separately in the UI.
   
   // 2. Short Options & Hedging (Spreads)
   // We pair short calls with long calls to find spreads and reduce margin.
