@@ -503,35 +503,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
         </div>
       </div>
 
-      {/* Metrics Bar */}
-      <div className="flex flex-col lg:flex-row gap-4 items-center">
-        <div className="flex-1 w-full">
-          <StrategyMetricsBar legs={legs} globalInputs={globalInputs} marginRequired={estimatedMargin} />
-        </div>
-        {isPaperTradeMode && (
-          <div className="flex gap-2 w-full lg:w-auto mt-4 lg:mt-0">
-            <button 
-              onClick={() => setShowLoadModal(true)}
-              className="flex-1 lg:flex-none px-4 py-4 bg-[#1f2937] hover:bg-[#374151] text-[#e6edf3] font-bold rounded-xl border border-[#30363d] transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <FolderOpen size={18} /> Load
-            </button>
-            <button 
-              onClick={() => setShowSaveModal(true)}
-              className="flex-1 lg:flex-none px-4 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <Save size={18} /> Save
-            </button>
-            <button 
-              onClick={handlePaperTrade}
-              className="flex-1 lg:flex-none px-4 py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <BarChart2 size={18} /> Execute
-            </button>
-          </div>
-        )}
-      </div>
-
+      {/* Pre-made Strategies (Templates) */}
       {isPaperTradeMode && (
         <StrategyTemplates 
           spotPrice={live.data?.spot} 
@@ -549,6 +521,181 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
           }} 
         />
       )}
+
+      {/* Full Width Layout */}
+      <div className="space-y-6">
+        
+        {/* Legs Configurator */}
+        <div className="card p-4">
+          <LiveLegConfigurator 
+            legs={legs}
+            expiryDates={live.data?.expiryDates || []}
+            futExpiryDates={futExpiries || []}
+            byExpiry={live.data?.byExpiry || {}}
+            onUpdateLeg={updateLeg}
+            onAddLeg={addLeg}
+            onRemoveLeg={removeLeg}
+            futurePrice={live.data?.futurePrice}
+            fetchExpiry={(exp, isFut) => {
+              if (isFut) {
+                live.fetchNow(live.data.symbol, { force: false, expiry: targetExpiry, futExpiry: exp });
+              } else {
+                live.fetchNow(live.data.symbol, { force: false, expiry: exp, futExpiry: targetFutExpiry });
+              }
+            }}
+          />
+        </div>
+
+        {/* Action Buttons & Metrics Bar */}
+        <div className="flex flex-col lg:flex-row gap-4 items-center">
+          <div className="flex-1 w-full">
+            <StrategyMetricsBar legs={legs} globalInputs={globalInputs} marginRequired={estimatedMargin} />
+          </div>
+          {isPaperTradeMode && (
+            <div className="flex gap-2 w-full lg:w-auto mt-4 lg:mt-0">
+              <button 
+                onClick={() => setShowLoadModal(true)}
+                className="flex-1 lg:flex-none px-4 py-4 bg-[#1f2937] hover:bg-[#374151] text-[#e6edf3] font-bold rounded-xl border border-[#30363d] transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <FolderOpen size={18} /> Load
+              </button>
+              <button 
+                onClick={() => setShowSaveModal(true)}
+                className="flex-1 lg:flex-none px-4 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <Save size={18} /> Save
+              </button>
+              <button 
+                onClick={handlePaperTrade}
+                className="flex-1 lg:flex-none px-4 py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <BarChart2 size={18} /> Execute
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Detailed Margin Breakdown */}
+        {estimatedMargin?.totalMarginRequired > 0 && (
+          <div className="card p-4 space-y-4">
+            <div className="flex items-center gap-2 border-b border-[#30363d] pb-2">
+              <AlertCircle size={16} className="text-[#e3b341]" />
+              <h3 className="text-sm font-semibold text-[#e6edf3]">Margin Requirements</h3>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-xs text-[#8b949e]">
+              {/* Column 1 */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span>Span Margin:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.spanMargin.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Additional Margin:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.additionalMargin.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Pre Expiry Margin:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.preExpiryMargin.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Column 2 */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span>Exposure Margin:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.exposureMargin.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Special Margin:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.specialMargin.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Tender Margin:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.tenderMargin.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Column 3 */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span>Exposure Spread Benefit:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.exposureSpreadBenefit.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Delivery Margin:</span>
+                  <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.deliveryMargin.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center font-bold text-[#e6edf3] mt-2 pt-2 border-t border-[#30363d]/50">
+                  <span>Total Margin Required:</span>
+                  <span className="font-mono text-[#58a6ff] bg-[#58a6ff]/10 border border-[#58a6ff]/30 px-2 py-1 rounded min-w-[100px] text-right">
+                    {estimatedMargin.totalMarginRequired.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <p className="text-[10px] text-[#8b949e] italic mt-4">
+              *This is an estimated rule-based approximation for strategy building purposes. Actual broker margins will vary based on live volatility parameters and exchange SPAN files.
+            </p>
+          </div>
+        )}
+
+        {/* Payoff Chart */}
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-[#e6edf3]">Payoff Diagram (Live Data)</h3>
+          </div>
+          {legs.length > 0 ? (
+            <PayoffChart 
+              legs={legs} 
+              globalInputs={globalInputs}
+              spotRangePercent={15} 
+            />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-[#8b949e] border border-dashed border-[#30363d] rounded">
+              Add legs to see payoff chart
+            </div>
+          )}
+        </div>
+
+        {/* Probabilities and Theta */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="card p-4">
+            <ProbabilityPanel legs={legs} globalInputs={globalInputs} />
+          </div>
+          <div className="card p-4">
+            <ThetaDecayChart legs={legs} globalInputs={globalInputs} />
+          </div>
+        </div>
+
+        {/* Greeks Surface */}
+        <div className="card p-4">
+          <GreeksSurfaceChart legs={debouncedLegs} globalInputs={debouncedGlobalInputs} spotRangePercent={15} />
+        </div>
+
+        {/* Scenario Heatmap */}
+        <div className="card p-4">
+          <ScenarioHeatmap legs={debouncedLegs} globalInputs={debouncedGlobalInputs} />
+        </div>
+
+      </div>
 
       {/* Save Modal */}
       {showSaveModal && (
@@ -598,151 +745,6 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Full Width Layout */}
-      <div className="space-y-6">
-        
-        {/* Legs Configurator */}
-        <div className="card p-4">
-          <LiveLegConfigurator 
-            legs={legs}
-            expiryDates={live.data?.expiryDates || []}
-            futExpiryDates={futExpiries || []}
-            byExpiry={live.data?.byExpiry || {}}
-            onUpdateLeg={updateLeg}
-            onAddLeg={addLeg}
-            onRemoveLeg={removeLeg}
-            futurePrice={live.data?.futurePrice}
-            fetchExpiry={(exp, isFut) => {
-              if (isFut) {
-                live.fetchNow(live.data.symbol, { force: false, expiry: targetExpiry, futExpiry: exp });
-              } else {
-                live.fetchNow(live.data.symbol, { force: false, expiry: exp, futExpiry: targetFutExpiry });
-              }
-            }}
-          />
-        </div>
-
-        {/* Payoff Chart */}
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-[#e6edf3]">Payoff Diagram (Live Data)</h3>
-          </div>
-          {legs.length > 0 ? (
-            <PayoffChart 
-              legs={legs} 
-              globalInputs={globalInputs}
-              spotRangePercent={15} 
-            />
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-[#8b949e] border border-dashed border-[#30363d] rounded">
-              Add legs to see payoff chart
-            </div>
-          )}
-        </div>
-
-        {/* Probabilities and Theta */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="card p-4">
-            <ProbabilityPanel legs={legs} globalInputs={globalInputs} />
-          </div>
-          <div className="card p-4">
-            <ThetaDecayChart legs={legs} globalInputs={globalInputs} />
-          </div>
-        </div>
-
-        {/* Greeks Surface */}
-        <div className="card p-4">
-          <GreeksSurfaceChart legs={debouncedLegs} globalInputs={debouncedGlobalInputs} spotRangePercent={15} />
-        </div>
-
-        {/* Scenario Heatmap */}
-        <div className="card p-4">
-          <ScenarioHeatmap legs={debouncedLegs} globalInputs={debouncedGlobalInputs} />
-        </div>
-
-      </div>
-      {/* Detailed Margin Breakdown */}
-      {estimatedMargin?.totalMarginRequired > 0 && (
-        <div className="card p-4 space-y-4">
-          <div className="flex items-center gap-2 border-b border-[#30363d] pb-2">
-            <AlertCircle size={16} className="text-[#e3b341]" />
-            <h3 className="text-sm font-semibold text-[#e6edf3]">Margin Requirements</h3>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-xs text-[#8b949e]">
-            {/* Column 1 */}
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span>Span Margin:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.spanMargin.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>Additional Margin:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.additionalMargin.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>Pre Expiry Margin:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.preExpiryMargin.toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            {/* Column 2 */}
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span>Exposure Margin:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.exposureMargin.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>Special Margin:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.specialMargin.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>Tender Margin:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.tenderMargin.toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            {/* Column 3 */}
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span>Exposure Spread Benefit:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.exposureSpreadBenefit.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>Delivery Margin:</span>
-                <span className="font-mono text-[#e6edf3] bg-[#0d1117] border border-[#30363d] px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.deliveryMargin.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center font-bold text-[#e6edf3] mt-2 pt-2 border-t border-[#30363d]/50">
-                <span>Total Margin Required:</span>
-                <span className="font-mono text-[#58a6ff] bg-[#58a6ff]/10 border border-[#58a6ff]/30 px-2 py-1 rounded min-w-[100px] text-right">
-                  {estimatedMargin.totalMarginRequired.toFixed(2)}
-                </span>
-              </div>
-            </div>
-          </div>
-          
-          <p className="text-[10px] text-[#8b949e] italic mt-4">
-            *This is an estimated rule-based approximation for strategy building purposes. Actual broker margins will vary based on live volatility parameters and exchange SPAN files.
-          </p>
         </div>
       )}
 
