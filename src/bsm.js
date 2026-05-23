@@ -220,7 +220,7 @@ export function strategyPayoffAtExpiry(legs, spotAtExpiry) {
 export function strategyBSMPnL(legs, spot, T_remaining, iv, r, q) {
   return legs.reduce((total, leg) => {
     let currentPrice = 0;
-    if (leg.type === 'underlying' || leg.type === 'future') {
+    if (leg.type === 'underlying') {
       currentPrice = spot;
     } else {
       const legT = leg.T !== undefined ? leg.T : T_remaining;

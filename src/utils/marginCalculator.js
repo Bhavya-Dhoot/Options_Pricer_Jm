@@ -166,8 +166,12 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
   const _longCalls = JSON.parse(JSON.stringify(longCalls));
   const _longPuts = JSON.parse(JSON.stringify(longPuts));
   
-  totalMargin += processShorts(shortCalls, _longCalls, true);
-  totalMargin += processShorts(shortPuts, _longPuts, false);
+  const callMargin = processShorts(shortCalls, _longCalls, true);
+  const putMargin = processShorts(shortPuts, _longPuts, false);
+  
+  // Opposing Risk Offset (Iron Condor / Short Straddle)
+  // Since the market can only move in one direction at expiry, SPAN charges margin for the maximum risk side.
+  totalMargin += Math.max(callMargin, putMargin);
   
   // Split into SPAN and Exposure (Approximation: 80% SPAN, 20% Exposure)
   const spanMargin = totalMargin * 0.80;
