@@ -51,6 +51,7 @@ export const startPriceCacheLoop = () => {
   console.log('[PriceCache] Starting background fetch loop with Priority Queueing...');
   
   const fetchLoop = async () => {
+    let delayForNext = 900; // Base sustainable rate to protect 5000/hr limit
     try {
       const now = Date.now();
       // Garbage Collection: Remove symbols not requested in the last 10 minutes
@@ -84,8 +85,6 @@ export const startPriceCacheLoop = () => {
         rIndex = (rIndex + 1) % rQueue.length;
         targetSymbol = rQueue[rIndex];
       }
-
-      let delayForNext = 900; // Base sustainable rate to protect 5000/hr limit
 
       if (targetSymbol) {
         const now = Date.now();
