@@ -261,6 +261,15 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
     
     const T = Math.max(0.5, (expiryDateObj.getTime() - Date.now()) / 86400000) / 365;
 
+    const getFairPrice = (quote, bestBuy, bestSell) => {
+      const bid = bestBuy?.price || 0;
+      const ask = bestSell?.price || 0;
+      if (bid > 0 && ask > 0) return (bid + ask) / 2;
+      if (bid > 0) return bid;
+      if (ask > 0) return ask;
+      return quote.ltp;
+    };
+
     const strikeRecords = relevantStrikes.map(strike => {
       const record = { strikePrice: strike, call: null, put: null };
       
@@ -273,9 +282,10 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       if (ceQuote) {
         const bestBuy = ceQuote.depth?.buy?.[0];
         const bestSell = ceQuote.depth?.sell?.[0];
+        const fairPrice = getFairPrice(ceQuote, bestBuy, bestSell);
         
         let prevCalcIV = ivCache.get(ceToken) || 0.20;
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, ceQuote.ltp, 'CALL', 0.012, prevCalcIV) || 0.15;
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, fairPrice, 'CALL', 0.012, prevCalcIV) || 0.15;
         ivCache.set(ceToken, calcIV);
         
         record.call = {
@@ -285,6 +295,7 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
           bidQty: bestBuy?.quantity || 0,
           askPrice: bestSell?.price || 0,
           askQty: bestSell?.quantity || 0,
+          markPrice: fairPrice,
           iv: calcIV * 100 
         };
       }
@@ -292,9 +303,10 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       if (peQuote) {
         const bestBuy = peQuote.depth?.buy?.[0];
         const bestSell = peQuote.depth?.sell?.[0];
+        const fairPrice = getFairPrice(peQuote, bestBuy, bestSell);
 
         let prevCalcIV = ivCache.get(peToken) || 0.20;
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, peQuote.ltp, 'PUT', 0.012, prevCalcIV) || 0.15;
+        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, fairPrice, 'PUT', 0.012, prevCalcIV) || 0.15;
         ivCache.set(peToken, calcIV);
 
         record.put = {
@@ -304,6 +316,7 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
           bidQty: bestBuy?.quantity || 0,
           askPrice: bestSell?.price || 0,
           askQty: bestSell?.quantity || 0,
+          markPrice: fairPrice,
           iv: calcIV * 100
         };
       }

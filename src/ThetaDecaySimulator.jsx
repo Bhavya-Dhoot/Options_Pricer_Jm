@@ -1000,8 +1000,8 @@ export default function ThetaDecaySimulator() {
       if (targetStrike) {
         const relevantIV = optionType === 'CALL' ? targetStrike.call?.iv : targetStrike.put?.iv;
         if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
-        // Auto-fill market premium from the live LTP
-        const ltp = optionType === 'CALL' ? targetStrike.call?.ltp : targetStrike.put?.ltp;
+        // Auto-fill market premium from the live markPrice (mid-price)
+        const ltp = optionType === 'CALL' ? targetStrike.call?.markPrice : targetStrike.put?.markPrice;
         if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
       }
     }
@@ -1028,7 +1028,7 @@ export default function ThetaDecaySimulator() {
           setStrikePrice(targetStrike.strikePrice);
           const relevantIV = optionType === 'CALL' ? targetStrike.call?.iv : targetStrike.put?.iv;
           if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
-          const ltp = optionType === 'CALL' ? targetStrike.call?.ltp : targetStrike.put?.ltp;
+          const ltp = optionType === 'CALL' ? targetStrike.call?.markPrice : targetStrike.put?.markPrice;
           if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
         }
       }
@@ -1042,7 +1042,7 @@ export default function ThetaDecaySimulator() {
     if (strikeData) {
       const relevantIV = optionType === 'CALL' ? strikeData.call?.iv : strikeData.put?.iv;
       if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
-      const ltp = optionType === 'CALL' ? strikeData.call?.ltp : strikeData.put?.ltp;
+      const ltp = optionType === 'CALL' ? strikeData.call?.markPrice : strikeData.put?.markPrice;
       if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
     }
   }, [chainStrikes, optionType]);
@@ -1054,7 +1054,7 @@ export default function ThetaDecaySimulator() {
     if (strikeData) {
       const relevantIV = newType === 'CALL' ? strikeData.call?.iv : strikeData.put?.iv;
       if (relevantIV && relevantIV > 0) setIv(Math.round(relevantIV * 100) / 100);
-      const ltp = newType === 'CALL' ? strikeData.call?.ltp : strikeData.put?.ltp;
+      const ltp = newType === 'CALL' ? strikeData.call?.markPrice : strikeData.put?.markPrice;
       if (ltp && ltp > 0) setMarketPremium(Math.round(ltp * 100) / 100);
     }
   }, [chainStrikes, strikePrice]);
