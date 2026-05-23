@@ -103,16 +103,15 @@ export const startPriceCacheLoop = () => {
           };
           
           // Save snapshot to DB if 60 seconds have passed for this symbol
-          const now = Date.now();
-          if (!lastSnapshotTime[targetSymbol] || now - lastSnapshotTime[targetSymbol] >= 60000) {
-            lastSnapshotTime[targetSymbol] = now;
+          const snapshotNow = Date.now();
+          if (!lastSnapshotTime[targetSymbol] || snapshotNow - lastSnapshotTime[targetSymbol] >= 60000) {
+            lastSnapshotTime[targetSymbol] = snapshotNow;
             MarketSnapshot.create({
               symbol: targetSymbol,
-              timestamp: new Date(now),
+              timestamp: new Date(snapshotNow),
               data: data
             }).catch(e => console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message));
           }
-        }
         } else {
           // Request was skipped because it's too fresh! NO quota consumed.
           // Don't punish the background loop with a 900ms delay if we didn't hit the API.
