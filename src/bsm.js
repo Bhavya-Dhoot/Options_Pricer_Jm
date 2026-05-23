@@ -287,6 +287,11 @@ export function findMaxProfitLoss(legs, spotMin, spotMax, steps = 10000) {
     isMaxLossInf = true;
   }
 
+  // Ensure we capture the absolute downside boundary (Spot = 0)
+  const pnlZero = strategyPayoffAtExpiry(legs, 0);
+  if (pnlZero > maxP) maxP = pnlZero;
+  if (pnlZero < maxL) maxL = pnlZero;
+
   // Scan for peaks and valleys within the range
   for (let i = 0; i <= steps; i++) {
     const spot = spotMin + i * stepSize;
@@ -347,7 +352,12 @@ export function probabilityOfProfit(legs, S, T, r, q, iv, steps = 1000) {
     }
   }
   
-  return { pop, ev, pMaxProfit, pMaxLoss };
+  return { 
+    pop: Math.min(1, Math.max(0, pop)), 
+    ev, 
+    pMaxProfit: Math.min(1, Math.max(0, pMaxProfit)), 
+    pMaxLoss: Math.min(1, Math.max(0, pMaxLoss)) 
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
