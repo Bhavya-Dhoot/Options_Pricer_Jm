@@ -1,4 +1,5 @@
 import axios from 'axios';
+import https from 'https';
 import { TOTP } from 'totp-generator';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -165,8 +166,12 @@ const processQueue = async () => {
   isProcessingQueue = false;
 };
 
+// Performance Optimization: Reusing TCP socket via Keep-Alive
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+
 const executeAxiosRequest = async (endpoint, payload, jwtToken) => {
   const response = await axios.post(`${BASE_URL}${endpoint}`, payload, {
+    httpsAgent,
     headers: {
       ...getHeaders(),
       'Authorization': `Bearer ${jwtToken}`
