@@ -188,9 +188,20 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
   const augmentedOpenTrades = openTrades.map(trade => {
     const liveLTP = getLivePriceForTrade(trade);
     const direction = trade.action === 'buy' ? 1 : -1;
-    const pnl = direction * (liveLTP - trade.entryPrice) * trade.qty * trade.lotSize;
+    
+    let lotSize = trade.lotSize;
+    if (!lotSize) {
+      if (trade.symbol === 'BANKNIFTY') lotSize = 15;
+      else if (trade.symbol === 'FINNIFTY') lotSize = 40;
+      else if (trade.symbol === 'MIDCPNIFTY') lotSize = 75;
+      else if (trade.symbol === 'SENSEX') lotSize = 10;
+      else if (trade.symbol === 'BANKEX') lotSize = 15;
+      else lotSize = 25;
+    }
+
+    const pnl = direction * (liveLTP - trade.entryPrice) * trade.qty * lotSize;
     totalUnrealizedPnL += pnl;
-    return { ...trade, liveLTP, pnl };
+    return { ...trade, liveLTP, pnl, lotSize };
   });
 
   return (

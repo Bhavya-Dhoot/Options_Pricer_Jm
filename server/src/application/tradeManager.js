@@ -331,8 +331,20 @@ export const exitTrade = async (req, res) => {
 
     // Calculate PnL for this exit
     const direction = trade.action === 'buy' ? 1 : -1;
-    const pnl = direction * (verifiedExitPrice - trade.entryPrice) * parsedExitQty * trade.lotSize;
+    let lotSize = trade.lotSize;
+    if (!lotSize) {
+      if (trade.symbol === 'BANKNIFTY') lotSize = 15;
+      else if (trade.symbol === 'FINNIFTY') lotSize = 40;
+      else if (trade.symbol === 'MIDCPNIFTY') lotSize = 75;
+      else if (trade.symbol === 'SENSEX') lotSize = 10;
+      else if (trade.symbol === 'BANKEX') lotSize = 15;
+      else lotSize = 25;
+    }
+    const pnl = direction * (verifiedExitPrice - trade.entryPrice) * parsedExitQty * lotSize;
     
+    // Safety check to prevent NaN propagation to MongoDB
+    if (isNaN(pnl)) return res.status(400).json({ error: 'Critical calculation error: Resulting PnL is NaN' });
+
     // Update User Capital
     // Update User Capital using atomic $inc to prevent concurrency race conditions
     await User.updateOne(
