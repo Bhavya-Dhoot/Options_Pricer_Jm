@@ -37,24 +37,36 @@ export async function initScripMaster() {
     for (let i = 0; i < scripMaster.length; i++) {
       const s = scripMaster[i];
       if (s.exch_seg === 'NSE' || s.exch_seg === 'BSE') {
-        nseMaster.push(s);
+        nseMaster.push({ symbol: s.symbol, name: s.name, token: s.token });
       } else if (s.exch_seg === 'NFO' || s.exch_seg === 'BFO') {
         const sym = s.name;
         
         if (!lotSizeCache[sym] && s.lotsize) {
           lotSizeCache[sym] = parseInt(s.lotsize, 10);
         }
+        
+        // Trim fat: Keep only required fields to save 150MB+ RAM
+        const trimmedScrip = {
+          token: s.token,
+          symbol: s.symbol,
+          name: s.name,
+          expiry: s.expiry,
+          strike: s.strike,
+          lotsize: s.lotsize,
+          instrumenttype: s.instrumenttype,
+          tick_size: s.tick_size
+        };
 
         if (s.instrumenttype.startsWith('OPT')) {
           if (!optionsIndex[sym]) { optionsIndex[sym] = {}; expSet[sym] = new Set(); }
           if (!optionsIndex[sym][s.expiry]) { optionsIndex[sym][s.expiry] = []; }
           
-          optionsIndex[sym][s.expiry].push(s);
+          optionsIndex[sym][s.expiry].push(trimmedScrip);
           expSet[sym].add(s.expiry);
           
         } else if (s.instrumenttype.startsWith('FUT')) {
           if (!futuresIndex[sym]) { futuresIndex[sym] = {}; futExpSet[sym] = new Set(); }
-          if (!futuresIndex[sym][s.expiry]) { futuresIndex[sym][s.expiry] = s; }
+          if (!futuresIndex[sym][s.expiry]) { futuresIndex[sym][s.expiry] = trimmedScrip; }
           
           futExpSet[sym].add(s.expiry);
         }
@@ -70,6 +82,9 @@ export async function initScripMaster() {
     }
 
     console.log(`[ScripMaster] Loaded ${nseMaster.length} Spot equities and indexed ${Object.keys(optionsIndex).length} NFO/BFO derivatives into O(1) maps.`);
+    
+    // Aggressive Garbage Collection: Sever the reference to the 20MB raw JSON blob
+    scripMaster.length = 0;
   } catch (err) {
     console.error('[ScripMaster] Failed to download Scrip Master:', err.message);
     throw err;

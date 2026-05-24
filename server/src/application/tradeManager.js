@@ -1,8 +1,32 @@
+import mongoose from 'mongoose';
 import Trade from '../domain/Trade.js';
 import User from '../domain/User.js';
 import { getLatestPrice, registerSymbol, forceFetchLatestPrice } from './priceCache.js';
 import { getLotSize } from '../../scripMaster.js';
 import { estimateMargin } from '../domain/marginCalculator.js';
+
+// In-Memory Mutex Lock for User Threads
+const userLocks = new Map();
+
+async function acquireLock(userId) {
+  const uid = userId.toString();
+  if (!userLocks.has(uid)) {
+    userLocks.set(uid, Promise.resolve());
+  }
+  let release;
+  const nextLock = new Promise(resolve => release = resolve);
+  const currentLock = userLocks.get(uid);
+  userLocks.set(uid, currentLock.then(() => nextLock));
+  await currentLock;
+  
+  // Return release function, also garbage collect the map if no waiters
+  return () => {
+    release();
+    if (userLocks.get(uid) === nextLock) {
+      userLocks.delete(uid);
+    }
+  };
+}
 
 const parseExpiry = (expiryStr) => {
   if (!expiryStr) return 0;
@@ -25,6 +49,8 @@ export const placeTrade = async (req, res) => {
   if (!qty || !Number.isInteger(qty) || qty <= 0) {
     return res.status(400).json({ error: 'Quantity must be a positive integer.' });
   }
+
+  const releaseLock = await acquireLock(req.user._id);
 
   try {
     const user = await User.findById(req.user._id);
@@ -132,6 +158,8 @@ export const placeTrade = async (req, res) => {
     res.status(201).json(trade);
   } catch (error) {
     res.status(400).json({ error: error.message });
+  } finally {
+    releaseLock();
   }
 };
 
@@ -143,6 +171,8 @@ export const placeBatchTrades = async (req, res) => {
   if (legs.length > 20) {
     return res.status(400).json({ error: 'Maximum of 20 legs allowed per batch trade.' });
   }
+
+  const releaseLock = await acquireLock(req.user._id);
 
   try {
     const user = await User.findById(req.user._id);
@@ -242,6 +272,8 @@ export const placeBatchTrades = async (req, res) => {
     res.status(201).json(newTrades);
   } catch (error) {
     res.status(400).json({ error: error.message });
+  } finally {
+    releaseLock();
   }
 };
 
@@ -280,28 +312,33 @@ export const getLivePrices = async (req, res) => {
 export const exitTrade = async (req, res) => {
   const { tradeId, exitQty, exitPrice } = req.body;
   
+  const releaseLock = await acquireLock(req.user._id);
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const trade = await Trade.findById(tradeId);
-    if (!trade) return res.status(404).json({ error: 'Trade not found' });
-    if (trade.user.toString() !== req.user._id.toString()) return res.status(401).json({ error: 'Unauthorized' });
-    if (trade.status !== 'OPEN') return res.status(400).json({ error: 'Trade is not open' });
+    if (!trade) { await session.abortTransaction(); return res.status(404).json({ error: 'Trade not found' }); }
+    if (trade.user.toString() !== req.user._id.toString()) { await session.abortTransaction(); return res.status(401).json({ error: 'Unauthorized' }); }
+    if (trade.status !== 'OPEN') { await session.abortTransaction(); return res.status(400).json({ error: 'Trade is not open' }); }
     
     const parsedExitQty = Number(exitQty);
-    if (isNaN(parsedExitQty) || parsedExitQty <= 0) return res.status(400).json({ error: 'Invalid exit quantity' });
-    if (parsedExitQty > trade.qty) return res.status(400).json({ error: 'Exit qty exceeds open qty' });
-    if (parsedExitQty !== trade.qty) return res.status(400).json({ error: 'Partial exits are not supported in this version. Must exit full quantity.' });
+    if (isNaN(parsedExitQty) || parsedExitQty <= 0) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid exit quantity' }); }
+    if (parsedExitQty > trade.qty) { await session.abortTransaction(); return res.status(400).json({ error: 'Exit qty exceeds open qty' }); }
+    if (parsedExitQty !== trade.qty) { await session.abortTransaction(); return res.status(400).json({ error: 'Partial exits are not supported in this version. Must exit full quantity.' }); }
 
     // Server-Side Verification of Exit Price
     let verifiedExitPrice = 0;
     const liveData = getLatestPrice(trade.symbol);
     
     if (!liveData || !liveData.data) {
+      await session.abortTransaction();
       return res.status(400).json({ error: 'Market data temporarily unavailable. Please try exiting again.' });
     }
 
     if (trade.type === 'future') {
       const futPrice = liveData.data.futurePrices?.[trade.expiry];
-      if (!futPrice) return res.status(400).json({ error: 'Market data unavailable for this future expiry.' });
+      if (!futPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'Market data unavailable for this future expiry.' }); }
       verifiedExitPrice = futPrice;
     } else if (trade.type === 'underlying') {
       verifiedExitPrice = liveData.data.spot;
@@ -310,22 +347,20 @@ export const exitTrade = async (req, res) => {
       if (!chain) {
         const expiryTime = parseExpiry(trade.expiry);
         if (expiryTime && Date.now() > expiryTime + 86400000) {
-          // The option chain is missing because it expired.
-          // Force-settle at exact intrinsic value using the current spot price.
           const spot = liveData.data.spot;
           verifiedExitPrice = trade.type === 'call' ? Math.max(spot - trade.strike, 0) : Math.max(trade.strike - spot, 0);
         } else {
+          await session.abortTransaction();
           return res.status(400).json({ error: 'Market data unavailable for this option expiry.' });
         }
       } else {
         const strikeData = chain.find(s => (s.strikePrice || s.strike) === trade.strike);
-      if (!strikeData) return res.status(400).json({ error: 'Market data unavailable for this strike.' });
+        if (!strikeData) { await session.abortTransaction(); return res.status(400).json({ error: 'Market data unavailable for this strike.' }); }
       
-      const optData = trade.type === 'call' ? strikeData.call : strikeData.put;
-      if (!optData) return res.status(400).json({ error: 'Market data unavailable for this option.' });
+        const optData = trade.type === 'call' ? strikeData.call : strikeData.put;
+        if (!optData) { await session.abortTransaction(); return res.status(400).json({ error: 'Market data unavailable for this option.' }); }
       
-      // MTM Exit: If we bought, we exit by selling to the Bid. If we sold, we exit by buying the Ask.
-      verifiedExitPrice = trade.action === 'buy' ? (optData.bidPrice || optData.ltp) : (optData.askPrice || optData.ltp);
+        verifiedExitPrice = trade.action === 'buy' ? (optData.bidPrice || optData.ltp) : (optData.askPrice || optData.ltp);
       }
     }
 
@@ -343,34 +378,68 @@ export const exitTrade = async (req, res) => {
     const pnl = direction * (verifiedExitPrice - trade.entryPrice) * parsedExitQty * lotSize;
     
     // Safety check to prevent NaN propagation to MongoDB
-    if (isNaN(pnl)) return res.status(400).json({ error: 'Critical calculation error: Resulting PnL is NaN' });
+    if (isNaN(pnl)) { await session.abortTransaction(); return res.status(400).json({ error: 'Critical calculation error: Resulting PnL is NaN' }); }
 
-    // Update User Capital
-    // Update User Capital using atomic $inc to prevent concurrency race conditions
+    // --- MARGIN EXPLOIT PROTECTION (Simulated Exit Portfolio Validation) ---
+    const user = await User.findById(req.user._id);
+    if (!user) { await session.abortTransaction(); return res.status(404).json({ error: 'User not found' }); }
+
+    const openTrades = await Trade.find({ user: user._id, status: 'OPEN', symbol: trade.symbol });
+    const remainingTrades = openTrades.filter(t => t._id.toString() !== trade._id.toString());
+    
+    if (remainingTrades.length > 0) {
+      const simulatedPortfolioLegs = remainingTrades.map(t => ({
+        type: t.type,
+        action: t.action,
+        qty: t.qty,
+        lotSize: t.lotSize,
+        strike: t.strike,
+        expiry: t.expiry,
+        premium: t.entryPrice
+      }));
+      
+      const newMarginEst = estimateMargin(simulatedPortfolioLegs, liveData.data.spot || trade.entryPrice, trade.symbol);
+      const newTotalMargin = newMarginEst.totalMarginRequired;
+      const simulatedCapital = user.virtualCapital + pnl;
+
+      if (newTotalMargin > simulatedCapital) {
+        await session.abortTransaction();
+        return res.status(400).json({ 
+          error: `Margin Call Protection: Exiting this hedge will expose your portfolio to a Naked margin requirement of ₹${newTotalMargin.toFixed(0)}, but your simulated capital is only ₹${simulatedCapital.toFixed(0)}. Please close your Short legs first.` 
+        });
+      }
+    }
+    // --- END MARGIN PROTECTION ---
+
+    // Update User Capital using ACID Transaction
     await User.updateOne(
       { _id: req.user._id },
-      { $inc: { realizedPnL: pnl, virtualCapital: pnl } }
+      { $inc: { realizedPnL: pnl, virtualCapital: pnl } },
+      { session }
     );
 
     // Atomically close trade
     const updatedTrade = await Trade.findOneAndUpdate(
       { _id: tradeId, status: 'OPEN' },
       { status: 'CLOSED', exitPrice: verifiedExitPrice, exitTime: Date.now(), $inc: { realizedPnL: pnl } },
-      { new: true }
+      { new: true, session }
     );
 
     if (!updatedTrade) {
-      // Revert user capital if trade closure failed concurrently
-      await User.updateOne(
-        { _id: req.user._id },
-        { $inc: { realizedPnL: -pnl, virtualCapital: -pnl } }
-      );
+      await session.abortTransaction();
       return res.status(400).json({ error: 'Trade already closed by another request' });
     }
     
+    await session.commitTransaction();
     return res.json(updatedTrade);
 
   } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     res.status(500).json({ error: error.message });
+  } finally {
+    session.endSession();
+    releaseLock();
   }
 };
