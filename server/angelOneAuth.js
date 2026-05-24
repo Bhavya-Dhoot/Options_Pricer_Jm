@@ -216,6 +216,8 @@ const executeAxiosRequest = async (endpoint, payload, jwtToken) => {
   return response.data;
 };
 
+let isRenewing = false;
+
 export async function smartApiRequest(endpoint, payload) {
   const sessionData = await getAngelSession();
   
@@ -228,10 +230,19 @@ export async function smartApiRequest(endpoint, payload) {
           return data;
         } catch (error) {
           if (error.isTokenExpired) {
-            console.log('[Angel One] Token expired, renewing...');
-            clearSession();
+            if (!isRenewing) {
+              isRenewing = true;
+              console.log('[Angel One] Token expired, acquiring global renewal lock...');
+              clearSession();
+              await getAngelSession().finally(() => { isRenewing = false; });
+            } else {
+              // Wait for the primary thread to finish renewing
+              while (isRenewing) {
+                await new Promise(resolve => setTimeout(resolve, 50));
+              }
+            }
             const newSession = await getAngelSession();
-            // Retry once immediately
+            // Retry once immediately with the new token
             return await executeAxiosRequest(endpoint, payload, newSession.jwtToken);
           }
           console.error(`[Angel One] Request Error (${endpoint}):`, error.response?.data || error.message);

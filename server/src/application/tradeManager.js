@@ -30,8 +30,11 @@ export const placeTrade = async (req, res) => {
     return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
   }
   
-  if (orderType === 'limit' && (limitPrice === undefined || limitPrice <= 0)) {
-    return res.status(400).json({ error: 'Limit price must be a positive number.' });
+  if (orderType === 'limit') {
+    const pLimit = Number(limitPrice);
+    if (isNaN(pLimit) || pLimit <= 0) {
+      return res.status(400).json({ error: 'Limit price must be a positive number.' });
+    }
   }
 
   const session = await mongoose.startSession();
@@ -115,6 +118,13 @@ export const placeTrade = async (req, res) => {
 
     // Dynamic Margin Check using holistic margin calculator for portfolio
     const openTrades = await Trade.find({ user: user._id, status: 'OPEN' }).session(session);
+    
+    // Portfolio Array Exhaustion (Bot Spam) Protection
+    if (openTrades.length >= 50) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Maximum limit of 50 active portfolio legs reached. Close existing trades to open new ones.' });
+    }
+    
     const allPortfolioLegs = openTrades.map(t => ({
       type: t.type,
       action: t.action,
@@ -211,9 +221,12 @@ export const placeBatchTrades = async (req, res) => {
         return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
       }
       
-      if (leg.orderType === 'limit' && (leg.limitPrice === undefined || leg.limitPrice <= 0)) {
-        await session.abortTransaction();
-        return res.status(400).json({ error: 'Limit price must be a positive number.' });
+      if (leg.orderType === 'limit') {
+        const pLimit = Number(leg.limitPrice);
+        if (isNaN(pLimit) || pLimit <= 0) {
+          await session.abortTransaction();
+          return res.status(400).json({ error: 'Limit price must be a positive number.' });
+        }
       }
       
       const verifiedLotSize = getLotSize(leg.symbol || baseSymbol);
@@ -260,6 +273,13 @@ export const placeBatchTrades = async (req, res) => {
 
     // Dynamic Margin Check using holistic margin calculator for portfolio
     const openTrades = await Trade.find({ user: user._id, status: 'OPEN' }).session(session);
+    
+    // Portfolio Array Exhaustion (Bot Spam) Protection
+    if (openTrades.length + verifiedLegs.length > 50) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Maximum limit of 50 active portfolio legs reached. Batch order would exceed limit.' });
+    }
+    
     const allPortfolioLegs = openTrades.map(t => ({
       type: t.type,
       action: t.action,
@@ -375,7 +395,14 @@ export const exitTrade = async (req, res) => {
 
     if (trade.type === 'future') {
       const futPrice = liveData.data.futurePrices?.[trade.expiry];
-      if (!futPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'Market data unavailable for this future expiry.' }); }
+      if (!futPrice) { 
+        const expiryTime = parseExpiry(trade.expiry);
+        if (expiryTime && Date.now() > expiryTime + 86400000) {
+          await session.abortTransaction();
+          return res.status(400).json({ error: 'This futures contract has expired and will be automatically cash-settled by the nightly clearing engine. It cannot be exited manually.' });
+        }
+        await session.abortTransaction(); return res.status(400).json({ error: 'Market data unavailable for this future expiry.' }); 
+      }
       verifiedExitPrice = futPrice;
     } else if (trade.type === 'underlying') {
       verifiedExitPrice = liveData.data.spot;
@@ -384,8 +411,8 @@ export const exitTrade = async (req, res) => {
       if (!chain) {
         const expiryTime = parseExpiry(trade.expiry);
         if (expiryTime && Date.now() > expiryTime + 86400000) {
-          const spot = liveData.data.spot;
-          verifiedExitPrice = trade.type === 'call' ? Math.max(spot - trade.strike, 0) : Math.max(trade.strike - spot, 0);
+          await session.abortTransaction();
+          return res.status(400).json({ error: 'This options contract has expired and will be automatically cash-settled by the nightly clearing engine. It cannot be exited manually.' });
         } else {
           await session.abortTransaction();
           return res.status(400).json({ error: 'Market data unavailable for this option expiry.' });
