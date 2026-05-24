@@ -3,7 +3,7 @@ import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import { strategyPayoffAtExpiry, findMaxProfitLoss, probabilityOfProfit, NIFTY_LOT_SIZE } from '../../bsm.js';
+import { strategyPayoffAtExpiry, findMaxProfitLoss, probabilityOfProfit } from '../../bsm.js';
 
 const COLORS = ['#58a6ff', '#3fb950', '#a371f7'];
 
@@ -30,7 +30,7 @@ export default function CompareMode({ strategies, globalInputs, spotRangePercent
         }
         const T = leg.dteIndex === 1 ? globalInputs.farDte / 365 : globalInputs.dte / 365;
         // Simplified premium for comparison (assumes 0 to compute intrinsic metrics, or we calculate it)
-        return { ...leg, strike, T, premium: 0 }; 
+        return { ...leg, strike, T, premium: 0, lotSize: globalInputs.lotSize || 25 }; 
         // Note: For an accurate comparison, we should calculate premium, but we only need intrinsic payoff shape
       });
       return { ...strat, legs };

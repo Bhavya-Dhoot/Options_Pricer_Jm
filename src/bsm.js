@@ -194,8 +194,6 @@ export function getDefaultExpiry() {
 // OPTIONS STRATEGIES EXTENSIONS
 // ═══════════════════════════════════════════════════════════
 
-export const NIFTY_LOT_SIZE = 25;
-
 /**
  * Net strategy P&L at expiry (intrinsic only).
  */

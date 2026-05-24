@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { 
-  findMaxProfitLoss, findBreakevens, probabilityOfProfit, NIFTY_LOT_SIZE, calculateBSM
+  findMaxProfitLoss, findBreakevens, probabilityOfProfit, calculateBSM
 } from '../../bsm.js';
 
 function fmt(v) { 
@@ -33,7 +33,7 @@ export default function StrategyMetricsBar({ legs, globalInputs, marginRequired 
     const netPremium = legs.reduce((total, leg) => {
       if (leg.type === 'future' || leg.type === 'underlying') return total;
       const sign = leg.action === 'buy' ? -1 : 1;
-      return total + sign * leg.premium * leg.qty * NIFTY_LOT_SIZE;
+      return total + sign * leg.premium * leg.qty * (leg.lotSize || 25);
     }, 0);
     
     // Greeks
@@ -41,7 +41,7 @@ export default function StrategyMetricsBar({ legs, globalInputs, marginRequired 
     legs.forEach(leg => {
       if (leg.type === 'underlying') {
         const sign = leg.action === 'buy' ? 1 : -1;
-        netDelta += sign * leg.qty * NIFTY_LOT_SIZE;
+        netDelta += sign * leg.qty * (leg.lotSize || 25);
       } else {
         const bsm = calculateBSM(
           globalInputs.spot, leg.strike, leg.T, globalInputs.rate, 
@@ -49,9 +49,9 @@ export default function StrategyMetricsBar({ legs, globalInputs, marginRequired 
         );
         if (bsm) {
           const sign = leg.action === 'buy' ? 1 : -1;
-          netDelta += sign * bsm.delta * leg.qty * NIFTY_LOT_SIZE;
-          netTheta += sign * bsm.theta * leg.qty * NIFTY_LOT_SIZE;
-          netVega += sign * bsm.vega * leg.qty * NIFTY_LOT_SIZE;
+          netDelta += sign * bsm.delta * leg.qty * (leg.lotSize || 25);
+          netTheta += sign * bsm.theta * leg.qty * (leg.lotSize || 25);
+          netVega += sign * bsm.vega * leg.qty * (leg.lotSize || 25);
         }
       }
     });

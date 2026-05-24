@@ -125,13 +125,23 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
     const dte = calculateDTE(targetExpiry);
     const farDte = calculateDTE(targetFutExpiry);
 
+    let lotSize = 25;
+    const sym = live.data?.symbol;
+    if (live.data?.lotSize) lotSize = live.data.lotSize;
+    else if (sym === 'BANKNIFTY') lotSize = 15;
+    else if (sym === 'FINNIFTY') lotSize = 40;
+    else if (sym === 'MIDCPNIFTY') lotSize = 75;
+    else if (sym === 'SENSEX') lotSize = 10;
+    else if (sym === 'BANKEX') lotSize = 15;
+
     return {
       spot,
       iv,
       rate: riskFreeRate / 100,
       dividend: 0.012,
       dte,
-      farDte
+      farDte,
+      lotSize
     };
   }, [live.data, targetExpiry, targetFutExpiry, riskFreeRate]);
 
