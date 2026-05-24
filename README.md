@@ -163,6 +163,17 @@ A classic brokerage exploit allows users to establish highly leveraged Naked pos
 - **Ghost Capital Reset Wall:** The `updateCapital` API now securely executes an `OPEN` trade existence query before resetting user accounts, eradicating the vulnerability where users could infinitely reset negative capital whilst holding open toxic positions.
 - **Market Slippage Abort:** Batch and individual Execution Engines natively support `slippageTolerance`. Market orders dynamically tracking the Ask/Bid spread will instantaneously abort if real-world slippage mathematically breaches the user's explicit parameter bounds.
 
+### 14. Enterprise Scalability & Caching
+- **Distributed Redis Caching:** The architecture completely decouples Node.js memory from the data layer via Redis. The Angel One fetching daemon caches option chain payloads directly to the Redis cluster, allowing infinite horizontal scaling of Express API instances to rapidly serve data without triggering the strict 3 req/sec exchange API limits.
+- **Socket.io Live Delta Streaming:** The React frontend abandons heavy REST polling (which demanded 100KB+ JSON payloads per second) in favor of event-driven `Socket.io` WebSockets. The backend broadcasts highly compressed 1KB JSON delta ticks, fundamentally collapsing TLS network strain.
+- **BSM Web Workers:** The immense 2D polynomial mathematical generation for the Theta Decay and Scenario curves is strictly offloaded to a dedicated background Web Worker (`bsm.worker.js`). The main React thread remains perfectly unblocked, guaranteeing a buttery smooth 60fps interaction when adjusting sliders.
+
+### 15. Production DevOps & Security Hardening
+- **MongoDB Connection Pooling:** The Mongoose driver is explicitly configured with `maxPoolSize: 50` to definitively prevent database socket bottlenecks when thousands of concurrent trades hit the execution engine.
+- **Reverse Proxy Blindness Fix:** The Express rate limiter is explicitly configured with `app.set('trust proxy', 1)`. This forces Node.js to accurately parse `X-Forwarded-For` headers from AWS ALB, Render, or Cloudflare, permanently preventing global DoS lockouts across the entire userbase during traffic spikes.
+- **Load Balancer Socket Hangup Fix:** Tuned `server.keepAliveTimeout` and `server.headersTimeout` above 60 seconds to completely eradicate intermittent `502 Bad Gateway` errors caused by Express aggressively killing idle sockets prematurely out-of-sync with Nginx load balancers.
+- **Thundering Herd JWT Shield:** An algorithmic lock (`isRenewing`) synchronizes massive bursts of concurrent `401 Expired Token` websocket errors. Sibling threads suspend and wait gracefully while the primary thread requests a fresh Angel One token, comprehensively blocking `/loginByPassword` API spam.
+
 ---
 
 ## Getting Started
