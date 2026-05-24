@@ -387,13 +387,18 @@ export function probabilityOfProfit(legs, S, T, r, q, iv, steps = 200) {
 // IMPLIED IV SOLVER (Newton-Raphson)
 // Back-solves the IV that produces the given market premium.
 // ═══════════════════════════════════════════════════════════
-export function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0, initialGuess = 0.20) {
+export async function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0, initialGuess = 0.20) {
   if (T <= 0 || marketPrice <= 0) return null;
   const intrinsic = optionType === 'CALL' ? Math.max(S - K, 0) : Math.max(K - S, 0);
   if (marketPrice < intrinsic) return null;
 
   let sigma = initialGuess; // Warm-Start optimization
   for (let i = 0; i < 50; i++) {
+    // Thread Yielding (DoS Prevention): Let the Node Event Loop breathe
+    if (i % 10 === 0) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    
     const bsm = calculateBSM(S, K, T, r, sigma, optionType, q);
     if (!bsm) return null;
     const diff = bsm.premium - marketPrice;

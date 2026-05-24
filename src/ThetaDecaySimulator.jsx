@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceDot, Legend,
@@ -119,10 +119,15 @@ function WhatIfScenarioSection({ S, K, calendarDays, r, sigma, optionType, q, ma
   }, [S, K, calendarDays, r, sigma, optionType, q, costBasis]);
 
   // Solve market-implied IV for the purple decay curve
-  const impliedIV = useMemo(() => {
-    if (!hasMarket || calendarDays <= 0) return null;
+  const [impliedIV, setImpliedIV] = useState(null);
+  
+  useEffect(() => {
+    if (!hasMarket || calendarDays <= 0) {
+      setImpliedIV(null);
+      return;
+    }
     const T = calendarDays / 365;
-    return solveImpliedIV(S, K, T, r, marketPremium, optionType, q);
+    solveImpliedIV(S, K, T, r, marketPremium, optionType, q).then(setImpliedIV);
   }, [S, K, calendarDays, r, marketPremium, optionType, q, hasMarket]);
 
   // Mini decay chart  -  dual curves (BSM yellow + market-implied purple)
@@ -418,10 +423,15 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
   const hasMarket = marketPremium > 0;
 
   // Solve for the market-implied IV
-  const impliedIV = useMemo(() => {
-    if (!hasMarket || calendarDays <= 0) return null;
+  const [impliedIV, setImpliedIV] = useState(null);
+  
+  useEffect(() => {
+    if (!hasMarket || calendarDays <= 0) {
+      setImpliedIV(null);
+      return;
+    }
     const T = calendarDays / 365;
-    return solveImpliedIV(S, K, T, r, marketPremium, optionType, q);
+    solveImpliedIV(S, K, T, r, marketPremium, optionType, q).then(setImpliedIV);
   }, [S, K, calendarDays, r, marketPremium, optionType, q, hasMarket]);
 
   // Generate BSM decay curve (yellow  -  using user's input IV)

@@ -5,28 +5,8 @@ import { getLatestPrice, registerSymbol, forceFetchLatestPrice } from './priceCa
 import { getLotSize } from '../../scripMaster.js';
 import { estimateMargin } from '../domain/marginCalculator.js';
 
-// In-Memory Mutex Lock for User Threads
-const userLocks = new Map();
-
-async function acquireLock(userId) {
-  const uid = userId.toString();
-  if (!userLocks.has(uid)) {
-    userLocks.set(uid, Promise.resolve());
-  }
-  let release;
-  const nextLock = new Promise(resolve => release = resolve);
-  const currentLock = userLocks.get(uid);
-  userLocks.set(uid, currentLock.then(() => nextLock));
-  await currentLock;
-  
-  // Return release function, also garbage collect the map if no waiters
-  return () => {
-    release();
-    if (userLocks.get(uid) === nextLock) {
-      userLocks.delete(uid);
-    }
-  };
-}
+// In-Memory Mutex Lock removed for distributed multi-node architecture
+// We now rely purely on MongoDB ACID Transactions for true row-level concurrency locking
 
 const parseExpiry = (expiryStr) => {
   if (!expiryStr) return 0;
@@ -49,11 +29,16 @@ export const placeTrade = async (req, res) => {
   if (!qty || !Number.isInteger(qty) || qty <= 0 || qty > 5000) {
     return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
   }
+  
+  if (orderType === 'limit' && (limitPrice === undefined || limitPrice <= 0)) {
+    return res.status(400).json({ error: 'Limit price must be a positive number.' });
+  }
 
-  const releaseLock = await acquireLock(req.user._id);
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).session(session);
     const verifiedLotSize = getLotSize(symbol);
     
     // Server-Side Price Verification
@@ -73,12 +58,14 @@ export const placeTrade = async (req, res) => {
       }
 
       if (!liveData || !liveData.data) {
+        await session.abortTransaction();
         return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
       }
 
       if (type === 'future') {
         const futPrice = liveData.data.futurePrices?.[expiry];
         if (!futPrice) {
+          await session.abortTransaction();
           return res.status(400).json({ error: 'Invalid future expiry or pricing unavailable.' });
         }
         verifiedEntryPrice = futPrice;
@@ -86,13 +73,13 @@ export const placeTrade = async (req, res) => {
         verifiedEntryPrice = liveData.data.spot;
       } else {
         const chain = liveData.data.byExpiry?.[expiry];
-        if (!chain) return res.status(400).json({ error: 'Invalid expiry for options.' });
+        if (!chain) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid expiry for options.' }); }
         
         const strikeData = chain.find(s => (s.strikePrice || s.strike) === strike);
-        if (!strikeData) return res.status(400).json({ error: 'Invalid strike price.' });
+        if (!strikeData) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid strike price.' }); }
         
         const optData = type === 'call' ? strikeData.call : strikeData.put;
-        if (!optData) return res.status(400).json({ error: 'Option data unavailable.' });
+        if (!optData) { await session.abortTransaction(); return res.status(400).json({ error: 'Option data unavailable.' }); }
         
         // Slippage / Bid-Ask
         // If Buy, we pay the Ask. If Sell, we get the Bid.
@@ -103,6 +90,7 @@ export const placeTrade = async (req, res) => {
       if (expectedPrice && slippageTolerance) {
         const deviation = Math.abs(verifiedEntryPrice - expectedPrice) / expectedPrice;
         if (deviation > (slippageTolerance / 100)) {
+          await session.abortTransaction();
           return res.status(400).json({ error: `Price moved significantly. Expected ₹${expectedPrice}, Live is ₹${verifiedEntryPrice}. Order cancelled to prevent slippage.` });
         }
       }
@@ -121,11 +109,12 @@ export const placeTrade = async (req, res) => {
     }
 
     if (estimatedMargin > Number.MAX_SAFE_INTEGER || (verifiedEntryPrice * qty * verifiedLotSize) > Number.MAX_SAFE_INTEGER) {
+      await session.abortTransaction();
       return res.status(400).json({ error: 'Calculated order value exceeds system arithmetic limits.' });
     }
 
     // Dynamic Margin Check using holistic margin calculator for portfolio
-    const openTrades = await Trade.find({ user: user._id, status: 'OPEN' });
+    const openTrades = await Trade.find({ user: user._id, status: 'OPEN' }).session(session);
     const allPortfolioLegs = openTrades.map(t => ({
       type: t.type,
       action: t.action,
@@ -147,10 +136,12 @@ export const placeTrade = async (req, res) => {
     const newTotalMargin = newMarginEst.totalMarginRequired;
 
     if (newTotalMargin > user.virtualCapital) {
+      await session.abortTransaction();
       return res.status(400).json({ error: `Insufficient margin. Required: ₹${newTotalMargin.toFixed(0)}, Available: ₹${user.virtualCapital.toFixed(0)}` });
     }
     
-    const trade = await Trade.create({
+    // Create the trade within the active session
+    const trade = await Trade.create([{
       user: req.user._id,
       symbol,
       type,
@@ -165,13 +156,17 @@ export const placeTrade = async (req, res) => {
       entryPrice: orderType === 'market' ? verifiedEntryPrice : null,
       entryTime: orderType === 'market' ? Date.now() : null,
       status: orderType === 'market' ? 'OPEN' : 'PENDING'
-    });
+    }], { session });
 
-    res.status(201).json(trade);
+    await session.commitTransaction();
+    res.status(201).json(trade[0]);
   } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     res.status(400).json({ error: error.message });
   } finally {
-    releaseLock();
+    session.endSession();
   }
 };
 
@@ -184,10 +179,11 @@ export const placeBatchTrades = async (req, res) => {
     return res.status(400).json({ error: 'Maximum of 20 legs allowed per batch trade.' });
   }
 
-  const releaseLock = await acquireLock(req.user._id);
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).session(session);
     const verifiedLegs = [];
     const baseSymbol = symbol || legs[0].symbol || 'NIFTY'; 
     registerSymbol(baseSymbol);
@@ -204,13 +200,20 @@ export const placeBatchTrades = async (req, res) => {
     }
     
     if (!liveData || !liveData.data) {
+      await session.abortTransaction();
       return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
     }
     const spot = liveData.data.spot;
 
     for (const leg of legs) {
       if (!leg.qty || !Number.isInteger(leg.qty) || leg.qty <= 0 || leg.qty > 5000) {
+        await session.abortTransaction();
         return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
+      }
+      
+      if (leg.orderType === 'limit' && (leg.limitPrice === undefined || leg.limitPrice <= 0)) {
+        await session.abortTransaction();
+        return res.status(400).json({ error: 'Limit price must be a positive number.' });
       }
       
       const verifiedLotSize = getLotSize(leg.symbol || baseSymbol);
@@ -218,17 +221,17 @@ export const placeBatchTrades = async (req, res) => {
       
       if (leg.type === 'future') {
         const futPrice = liveData.data.futurePrices?.[leg.expiry];
-        if (!futPrice) return res.status(400).json({ error: 'Future pricing unavailable.' });
+        if (!futPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'Future pricing unavailable.' }); }
         verifiedEntryPrice = futPrice;
       } else if (leg.type === 'underlying') {
         verifiedEntryPrice = liveData.data.spot;
       } else {
         const chain = liveData.data.byExpiry?.[leg.expiry];
-        if (!chain) return res.status(400).json({ error: 'Invalid expiry.' });
+        if (!chain) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid expiry.' }); }
         const strikeData = chain.find(s => (s.strikePrice || s.strike) === leg.strike);
-        if (!strikeData) return res.status(400).json({ error: 'Invalid strike.' });
+        if (!strikeData) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid strike.' }); }
         const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
-        if (!optData) return res.status(400).json({ error: 'Option data unavailable.' });
+        if (!optData) { await session.abortTransaction(); return res.status(400).json({ error: 'Option data unavailable.' }); }
         verifiedEntryPrice = leg.action === 'buy' ? (optData.askPrice || optData.ltp) : (optData.bidPrice || optData.ltp);
       }
       
@@ -236,12 +239,14 @@ export const placeBatchTrades = async (req, res) => {
       if (leg.expectedPrice && slippageTolerance) {
         const deviation = Math.abs(verifiedEntryPrice - leg.expectedPrice) / leg.expectedPrice;
         if (deviation > (slippageTolerance / 100)) {
+          await session.abortTransaction();
           return res.status(400).json({ error: `Price moved significantly on strike ${leg.strike}. Expected ₹${leg.expectedPrice}, Live is ₹${verifiedEntryPrice}. Batch order cancelled.` });
         }
       }
       
       // Safety Limit
       if ((verifiedEntryPrice * leg.qty * verifiedLotSize) > Number.MAX_SAFE_INTEGER) {
+         await session.abortTransaction();
          return res.status(400).json({ error: 'Calculated order value exceeds system arithmetic limits.' });
       }
       
@@ -254,7 +259,7 @@ export const placeBatchTrades = async (req, res) => {
     }
 
     // Dynamic Margin Check using holistic margin calculator for portfolio
-    const openTrades = await Trade.find({ user: user._id, status: 'OPEN' });
+    const openTrades = await Trade.find({ user: user._id, status: 'OPEN' }).session(session);
     const allPortfolioLegs = openTrades.map(t => ({
       type: t.type,
       action: t.action,
@@ -270,17 +275,17 @@ export const placeBatchTrades = async (req, res) => {
     const newTotalMargin = newMarginEst.totalMarginRequired;
     
     if (newTotalMargin > Number.MAX_SAFE_INTEGER) {
+      await session.abortTransaction();
       return res.status(400).json({ error: 'Calculated margin exceeds system arithmetic limits.' });
     }
 
     if (newTotalMargin > user.virtualCapital) {
+      await session.abortTransaction();
       return res.status(400).json({ error: `Insufficient margin. Required: ₹${newTotalMargin.toFixed(0)}, Available: ₹${user.virtualCapital.toFixed(0)}` });
     }
     
     // Create all trades atomically
-    const newTrades = [];
-    for (const leg of verifiedLegs) {
-      const trade = await Trade.create({
+    const tradeDocs = verifiedLegs.map(leg => ({
         user: req.user._id,
         symbol: leg.symbol || symbol,
         type: leg.type,
@@ -290,19 +295,23 @@ export const placeBatchTrades = async (req, res) => {
         orderType: 'market',
         qty: leg.qty,
         lotSize: leg.lotSize,
-        marginBlocked: leg.action === 'buy' ? (leg.entryPrice * leg.qty * leg.lotSize) : 0, // Hedged margin is complex, so we assign 0 to short legs since we evaluate portfolio holistically
+        marginBlocked: leg.action === 'buy' ? (leg.entryPrice * leg.qty * leg.lotSize) : 0, 
         entryPrice: leg.entryPrice,
         entryTime: Date.now(),
         status: 'OPEN'
-      });
-      newTrades.push(trade);
-    }
+    }));
+    
+    const newTrades = await Trade.create(tradeDocs, { session });
 
+    await session.commitTransaction();
     res.status(201).json(newTrades);
   } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     res.status(400).json({ error: error.message });
   } finally {
-    releaseLock();
+    session.endSession();
   }
 };
 
@@ -341,12 +350,11 @@ export const getLivePrices = async (req, res) => {
 export const exitTrade = async (req, res) => {
   const { tradeId, exitQty, exitPrice } = req.body;
   
-  const releaseLock = await acquireLock(req.user._id);
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const trade = await Trade.findById(tradeId);
+    const trade = await Trade.findById(tradeId).session(session);
     if (!trade) { await session.abortTransaction(); return res.status(404).json({ error: 'Trade not found' }); }
     if (trade.user.toString() !== req.user._id.toString()) { await session.abortTransaction(); return res.status(401).json({ error: 'Unauthorized' }); }
     if (trade.status !== 'OPEN') { await session.abortTransaction(); return res.status(400).json({ error: 'Trade is not open' }); }
@@ -469,6 +477,5 @@ export const exitTrade = async (req, res) => {
     res.status(500).json({ error: error.message });
   } finally {
     session.endSession();
-    releaseLock();
   }
 };

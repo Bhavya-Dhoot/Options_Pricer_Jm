@@ -307,7 +307,7 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
         const trueLtp = getTrueLtp(ceQuote);
         
         let prevCalcIV = ivCache.get(ceToken) || 0.20;
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, trueLtp, 'CALL', 0.012, prevCalcIV) || 0.15;
+        let calcIV = (await solveImpliedIV(spotPrice, strike, T, 0.065, trueLtp, 'CALL', 0.012, prevCalcIV)) || 0.15;
         ivCache.set(ceToken, calcIV);
         
         record.call = {
@@ -327,7 +327,7 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
         const trueLtp = getTrueLtp(peQuote);
 
         let prevCalcIV = ivCache.get(peToken) || 0.20;
-        let calcIV = solveImpliedIV(spotPrice, strike, T, 0.065, trueLtp, 'PUT', 0.012, prevCalcIV) || 0.15;
+        let calcIV = (await solveImpliedIV(spotPrice, strike, T, 0.065, trueLtp, 'PUT', 0.012, prevCalcIV)) || 0.15;
         ivCache.set(peToken, calcIV);
 
         record.put = {
