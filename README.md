@@ -1,5 +1,5 @@
 # Options Pricer & Trading Terminal
-
+ThetaCore or Quantix Execution Engine.
 A production-grade **Black-Scholes-Merton** options pricing engine and full-fledged **Paper Trading Terminal** built for Indian Equities and Indices. It features real-time data integration via the **Angel One SmartAPI**, interactive Greeks visualization, theta decay simulation, and a comprehensive multi-leg strategies builder with smart margin calculation.
 
 Built with React 19, Vite 8, Recharts, and a Node.js Express Backend.
