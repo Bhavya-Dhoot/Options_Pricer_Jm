@@ -136,28 +136,31 @@ export const placeTrade = async (req, res) => {
 };
 
 export const placeBatchTrades = async (req, res) => {
-  const { legs } = req.body;
+  const { legs, symbol } = req.body;
   if (!legs || !Array.isArray(legs) || legs.length === 0) {
-    return res.status(400).json({ error: 'Array of legs required.' });
+    return res.status(400).json({ error: 'Valid legs array required.' });
+  }
+  if (legs.length > 20) {
+    return res.status(400).json({ error: 'Maximum of 20 legs allowed per batch trade.' });
   }
 
   try {
     const user = await User.findById(req.user._id);
     const verifiedLegs = [];
-    const symbol = legs[0].symbol || 'NIFTY'; // Assume same symbol
-    registerSymbol(symbol);
+    const baseSymbol = symbol || legs[0].symbol || 'NIFTY'; 
+    registerSymbol(baseSymbol);
     
-    let liveData = getLatestPrice(symbol);
+    let liveData = getLatestPrice(baseSymbol);
     
     // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
     if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
       try {
-        liveData = await forceFetchLatestPrice(symbol);
+        liveData = await forceFetchLatestPrice(baseSymbol);
       } catch (e) {
-        console.warn(`[TradeManager] Force fetch failed for ${symbol}, using cache fallback.`, e.message);
+        console.warn(`[TradeManager] Force fetch failed for ${baseSymbol}, using cache fallback.`, e.message);
       }
     }
-
+    
     if (!liveData || !liveData.data) {
       return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
     }
@@ -168,7 +171,7 @@ export const placeBatchTrades = async (req, res) => {
         return res.status(400).json({ error: 'Quantity must be a positive integer.' });
       }
       
-      const verifiedLotSize = getLotSize(leg.symbol || symbol);
+      const verifiedLotSize = getLotSize(leg.symbol || baseSymbol);
       let verifiedEntryPrice = 0;
       
       if (leg.type === 'future') {

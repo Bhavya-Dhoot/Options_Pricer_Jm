@@ -87,6 +87,7 @@ export const updateCapital = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (user) {
       user.virtualCapital = Number(virtualCapital);
+      user.realizedPnL = 0;
       await user.save();
       
       res.json({

@@ -109,8 +109,9 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     }
   };
 
-  const handleUpdateCapital = async () => {
-    if (!newCapital || isNaN(newCapital)) return;
+  const handleUpdateCapital = async (amount) => {
+    const targetCapital = amount !== undefined && typeof amount !== 'object' ? amount : newCapital;
+    if (!targetCapital || isNaN(targetCapital)) return;
     try {
       const token = localStorage.getItem('auth_token');
       const res = await fetch('/api/auth/capital', {
@@ -119,7 +120,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ virtualCapital: Number(newCapital) })
+        body: JSON.stringify({ virtualCapital: Number(targetCapital) })
       });
       if (res.ok) {
         setProfile(await res.json());
@@ -233,7 +234,10 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
           ) : (
             <div className="flex items-center justify-between">
               <div className="text-2xl font-mono font-bold text-[#e6edf3]">₹{profile.virtualCapital.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
-              <button onClick={() => { setNewCapital(profile.virtualCapital); setIsEditingCapital(true); }} className="opacity-0 group-hover:opacity-100 text-[#8b949e] hover:text-white transition-opacity text-xs underline">Edit</button>
+              <div className="opacity-0 group-hover:opacity-100 flex gap-3 transition-opacity">
+                <button onClick={() => handleUpdateCapital(1000000)} className="text-[#8b949e] hover:text-red-400 text-xs underline">Reset</button>
+                <button onClick={() => { setNewCapital(profile.virtualCapital); setIsEditingCapital(true); }} className="text-[#8b949e] hover:text-white text-xs underline">Edit</button>
+              </div>
             </div>
           )}
         </div>
