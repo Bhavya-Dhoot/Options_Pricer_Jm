@@ -148,6 +148,9 @@ During a deep mathematical edge-case audit, a vulnerability was neutralized invo
 ### 10. True Market Bid/Ask Slippage Execution
 To emulate the harsh reality of options trading, the system stripped out artificial, fixed-percentage (0.5%) slippage overlays. Instead, the Execution Engine dynamically maps simulated Market Buy orders strictly to the real-time Ask Price, and Market Sell orders to the Bid Price. For extreme multi-leg batch trades (like 12-leg algorithmic spiders), the engine implements a strict 20-leg hard cap per sequence to permanently prevent malicious backend V8 event-loop exhaustion.
 
+### 11. Margin Hedge Bypass Exploitation Prevention
+A classic brokerage exploit allows users to establish highly leveraged Naked positions by first executing a fully-hedged batch (e.g. Iron Condor) to bypass initial margin checks, and then selectively exiting the Long Hedge legs. The backend `exitTrade` engine is fortified with a **Simulated Portfolio Margin Breaker**. Before an exit is approved, the engine mathematically simulates the surviving portfolio, re-runs the entire `estimateMargin` SPAN algorithm, and instantly `REJECTS` the exit if it triggers a margin shortfall. Users are algorithmically forced to close their short legs before or concurrently with their long hedges.
+
 ---
 
 ## Getting Started
