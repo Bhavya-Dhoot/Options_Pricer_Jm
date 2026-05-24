@@ -43,6 +43,10 @@ export const io = new SocketIOServer(server, {
   cors: { origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'], credentials: true }
 });
 
+// Load Balancer Fix: Keep-Alive Timeouts
+server.keepAliveTimeout = 65000; // 65 seconds
+server.headersTimeout = 66000;   // slightly higher than keepAlive
+
 // Redis Configuration
 export const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
 redisClient.on('error', (err) => console.log('[Redis] Client Error', err));

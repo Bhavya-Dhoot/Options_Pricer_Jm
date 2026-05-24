@@ -123,15 +123,12 @@ export const startPriceCacheLoop = () => {
           const snapshotNow = Date.now();
           if (!lastSnapshotTime[targetSymbol] || snapshotNow - lastSnapshotTime[targetSymbol] >= 60000) {
             lastSnapshotTime[targetSymbol] = snapshotNow;
-            try {
-              await MarketSnapshot.create({
-                symbol: targetSymbol,
-                timestamp: new Date(snapshotNow),
-                data: data
-              });
-            } catch (e) {
-              console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message);
-            }
+            // Fire and forget (Non-blocking)
+            MarketSnapshot.create({
+              symbol: targetSymbol,
+              timestamp: new Date(snapshotNow),
+              data: data
+            }).catch(e => console.error(`[PriceCache] Snapshot Failed:`, e.message));
           }
         } else {
           // Request was skipped because it's too fresh! NO quota consumed.
