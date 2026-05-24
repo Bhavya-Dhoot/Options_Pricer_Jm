@@ -39,22 +39,77 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
   const NAKED_SHORT_OPT_PERCENT = 0.15; // 15% of contract value
   const FUTURE_MARGIN_PERCENT = 0.12;   // 12% of contract value
   
-  // Separate legs by type and action
-  const longCalls = legs.filter(l => l.type === 'call' && l.action === 'buy');
-  const shortCalls = legs.filter(l => l.type === 'call' && l.action === 'sell');
-  const longPuts = legs.filter(l => l.type === 'put' && l.action === 'buy');
-  const shortPuts = legs.filter(l => l.type === 'put' && l.action === 'sell');
-  const futures = legs.filter(l => l.type === 'future');
+  const parseExpiry = (expiryStr) => {
+    if (!expiryStr) return 0;
+    try {
+      const day = parseInt(expiryStr.slice(0, 2), 10);
+      const monthStr = expiryStr.slice(3, 6);
+      const year = parseInt(expiryStr.slice(7), 10);
+      const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+      const month = months[monthStr];
+      if (month === undefined) return 0;
+      return new Date(year, month, day).getTime();
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  const processedLegs = legs.map(l => ({ ...l, expiryTime: parseExpiry(l.expiry) }));
+
+  const longCalls = processedLegs.filter(l => l.type === 'call' && l.action === 'buy');
+  const shortCalls = processedLegs.filter(l => l.type === 'call' && l.action === 'sell');
+  const longPuts = processedLegs.filter(l => l.type === 'put' && l.action === 'buy');
+  const shortPuts = processedLegs.filter(l => l.type === 'put' && l.action === 'sell');
+  const longFutures = processedLegs.filter(l => l.type === 'future' && l.action === 'buy');
+  const shortFutures = processedLegs.filter(l => l.type === 'future' && l.action === 'sell');
+  const futures = processedLegs.filter(l => l.type === 'future');
   
-  // 1. Long Options (Margin = Premium Paid)
-  // Options buying requires 100% upfront premium
-  [...longCalls, ...longPuts].forEach(leg => {
-    // If it's used as a hedge for a short, we still pay the premium, but it reduces the short's margin
-    totalMargin += (leg.premium * leg.qty * lotSize);
+  // 1. Long Options (Premium is paid in cash, NOT held as Margin)
+  // The net premium is already calculated and displayed separately in the UI.
+
+  // 2. Futures Margin
+  // Calculate directional margin for ALL futures first.
+  futures.forEach(leg => {
+    const futureMargin = (leg.premium || spotPrice) * lotSize * leg.qty * FUTURE_MARGIN_PERCENT;
+    totalMargin += futureMargin;
   });
-  
-  // 2. Short Options & Hedging (Spreads)
-  // We pair short calls with long calls to find spreads and reduce margin.
+
+  // 3. Futures Hedging (Covered Calls & Covered Puts)
+  const availableLongFutures = JSON.parse(JSON.stringify(longFutures));
+  const availableShortFutures = JSON.parse(JSON.stringify(shortFutures));
+
+  shortCalls.forEach(shortCall => {
+    let remainingQty = shortCall.qty;
+    for (let i = 0; i < availableLongFutures.length; i++) {
+      const fut = availableLongFutures[i];
+      if (fut.qty <= 0) continue;
+      // Future expiry must be >= option expiry to cover it safely
+      if (fut.expiryTime === 0 || fut.expiryTime >= shortCall.expiryTime) {
+        const hedgedQty = Math.min(remainingQty, fut.qty);
+        remainingQty -= hedgedQty;
+        fut.qty -= hedgedQty;
+        if (remainingQty === 0) break;
+      }
+    }
+    shortCall.qty = remainingQty;
+  });
+
+  shortPuts.forEach(shortPut => {
+    let remainingQty = shortPut.qty;
+    for (let i = 0; i < availableShortFutures.length; i++) {
+      const fut = availableShortFutures[i];
+      if (fut.qty <= 0) continue;
+      if (fut.expiryTime === 0 || fut.expiryTime >= shortPut.expiryTime) {
+        const hedgedQty = Math.min(remainingQty, fut.qty);
+        remainingQty -= hedgedQty;
+        fut.qty -= hedgedQty;
+        if (remainingQty === 0) break;
+      }
+    }
+    shortPut.qty = remainingQty;
+  });
+
+  // 4. Option Spreads (Debit & Credit Spreads)
   const processShorts = (shorts, longs, isCall) => {
     let margin = 0;
     
@@ -64,30 +119,38 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
     
     sortedShorts.forEach(shortLeg => {
       let remainingShortQty = shortLeg.qty;
+      if (remainingShortQty <= 0) return;
       
-      // Try to find a hedge
       for (let i = 0; i < availableLongs.length; i++) {
         const longLeg = availableLongs[i];
         if (longLeg.qty <= 0) continue;
         
-        // A valid hedge must protect the risk direction
-        const isValidHedge = isCall ? longLeg.strike > shortLeg.strike : longLeg.strike < shortLeg.strike;
+        // Phase 1: Expiry Matching (Long must expire >= Short to be a valid hedge)
+        if (longLeg.expiryTime > 0 && shortLeg.expiryTime > 0 && longLeg.expiryTime < shortLeg.expiryTime) {
+          continue; // Cannot hedge with a shorter-dated option (reverse calendar risk)
+        }
         
-        if (isValidHedge) {
-          const hedgedQty = Math.min(remainingShortQty, longLeg.qty);
-          
+        const hedgedQty = Math.min(remainingShortQty, longLeg.qty);
+        if (hedgedQty <= 0) continue;
+        
+        // Phase 2: Debit vs Credit Spread
+        const isCreditSpread = isCall ? longLeg.strike > shortLeg.strike : longLeg.strike < shortLeg.strike;
+        
+        if (isCreditSpread) {
           // Spread max loss = Width of spread * lotsize * qty
           const width = Math.abs(longLeg.strike - shortLeg.strike);
           const spreadRisk = width * lotSize * hedgedQty;
-          
-          // Margin for a spread is usually close to Max Loss
           margin += spreadRisk;
-          
-          remainingShortQty -= hedgedQty;
-          longLeg.qty -= hedgedQty; // consume the hedge
-          
-          if (remainingShortQty === 0) break;
+        } else {
+          // Debit spread: The short option is fully protected by the deeper ITM long option.
+          // Margin requirement for the spread structure is 0.
+          margin += 0;
         }
+        
+        remainingShortQty -= hedgedQty;
+        longLeg.qty -= hedgedQty; // consume the hedge
+        
+        if (remainingShortQty === 0) break;
       }
       
       // Any unhedged remaining quantity is a naked short
@@ -100,19 +163,15 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
     return margin;
   };
 
-  // Deep copy for quantity mutation during hedge matching
   const _longCalls = JSON.parse(JSON.stringify(longCalls));
   const _longPuts = JSON.parse(JSON.stringify(longPuts));
   
-  totalMargin += processShorts(shortCalls, _longCalls, true);
-  totalMargin += processShorts(shortPuts, _longPuts, false);
+  const callMargin = processShorts(shortCalls, _longCalls, true);
+  const putMargin = processShorts(shortPuts, _longPuts, false);
   
-  // 3. Futures
-  futures.forEach(leg => {
-    // Basic directional future margin (long or short usually similar)
-    const futureMargin = (leg.premium || spotPrice) * lotSize * leg.qty * FUTURE_MARGIN_PERCENT;
-    totalMargin += futureMargin;
-  });
+  // Opposing Risk Offset (Iron Condor / Short Straddle)
+  // Since the market can only move in one direction at expiry, SPAN charges margin for the maximum risk side.
+  totalMargin += Math.max(callMargin, putMargin);
   
   // Split into SPAN and Exposure (Approximation: 80% SPAN, 20% Exposure)
   const spanMargin = totalMargin * 0.80;

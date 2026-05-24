@@ -146,6 +146,8 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
 
     if (trade.type === 'future') {
       return data.futurePrices?.[trade.expiry] || data.spot || trade.entryPrice;
+    } else if (trade.type === 'underlying') {
+      return data.spot || trade.entryPrice;
     } else {
       const chain = data.byExpiry?.[trade.expiry];
       if (!chain) return trade.entryPrice;

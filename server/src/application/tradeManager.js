@@ -41,6 +41,8 @@ export const placeTrade = async (req, res) => {
           return res.status(400).json({ error: 'Invalid future expiry or pricing unavailable.' });
         }
         verifiedEntryPrice = futPrice;
+      } else if (type === 'underlying') {
+        verifiedEntryPrice = liveData.data.spot;
       } else {
         const chain = liveData.data.byExpiry?.[expiry];
         if (!chain) return res.status(400).json({ error: 'Invalid expiry for options.' });
@@ -158,6 +160,8 @@ export const placeBatchTrades = async (req, res) => {
         const futPrice = liveData.data.futurePrices?.[leg.expiry];
         if (!futPrice) return res.status(400).json({ error: 'Future pricing unavailable.' });
         verifiedEntryPrice = futPrice;
+      } else if (leg.type === 'underlying') {
+        verifiedEntryPrice = liveData.data.spot;
       } else {
         const chain = liveData.data.byExpiry?.[leg.expiry];
         if (!chain) return res.status(400).json({ error: 'Invalid expiry.' });
@@ -279,6 +283,8 @@ export const exitTrade = async (req, res) => {
       const futPrice = liveData.data.futurePrices?.[trade.expiry];
       if (!futPrice) return res.status(400).json({ error: 'Market data unavailable for this future expiry.' });
       verifiedExitPrice = futPrice;
+    } else if (trade.type === 'underlying') {
+      verifiedExitPrice = liveData.data.spot;
     } else {
       const chain = liveData.data.byExpiry?.[trade.expiry];
       if (!chain) return res.status(400).json({ error: 'Market data unavailable for this option expiry.' });
