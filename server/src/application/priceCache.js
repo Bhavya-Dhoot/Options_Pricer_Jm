@@ -1,7 +1,8 @@
 import { smartApiRequest } from '../../angelOneAuth.js';
 import { getFutureToken, getOptionTokens, getUnderlyingToken } from '../../scripMaster.js';
 import { MarketSnapshot } from '../domain/MarketSnapshot.js';
-import { fetchMarketDataChain, redisClient, chainCache } from '../../proxy.js';
+import { redisClient } from '../../proxy.js';
+import { fetchMarketDataChain, chainCache } from './marketDataService.js';
 
 // Global cache
 // { "NIFTY": { spot: 24500, iv: 0.15, optionChain: [...], futures: {...}, timestamp: 123456 } }

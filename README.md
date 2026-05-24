@@ -31,6 +31,17 @@ To ensure mathematical perfection across edge-cases, the engine includes strict 
 ### ⚡ Unified Paper Trading Terminal
 The Strategy Builder is deeply integrated into the Paper Trading Dashboard. Unauthenticated users get a pure mathematical sandbox, while authenticated users can save custom templates, utilize 1-click strategy generation (Straddles, Spreads, Condors), and execute virtual trades seamlessly into a MongoDB portfolio with real-time MTM (Mark-To-Market) tracking.
 
+### 🤖 Headless Agent-as-a-Service (AaaS) API
+The backend exposes a heavily decoupled, headless **Agent API Layer** designed for advanced AI Agents and LLMs:
+- **Token-Optimized Compression**: Market payloads (`/api/agent/chain`) are mathematically compressed into ultra-dense JSON (stripping noise and deep order book arrays), intentionally designed to fit inside LLM Context Windows without hitting token limits.
+- **Headless Risk Simulation**: Agents can hit `/api/agent/simulate` to programmatically dry-run SPAN margin requirements and theoretical Maximum Loss boundaries before committing to algorithmic execution.
+- **Agent Executions**: A secured headless endpoint allows authenticated AI Agents to automatically push batch trade executions into the platform.
+
+### 🧪 Enterprise Rigor & Math Testing
+To guarantee mathematically sound operations, the underlying Quantitative Engine is fully decoupled from the Presentation layer and subjected to a comprehensive `vitest` suite.
+- **BSM & Greeks Rigor**: Validates the underlying `solveImpliedIV` Newton-Raphson approximation and tests the lognormal integration components against expected bounds.
+- **Margin Engine Checks**: Automates tests against massive risk-offsets (ensuring naked shorts charge heavy margin while fully hedged positions algorithmically charge near-zero margin).
+
 ---
 
 ## 🔥 Algorithmic & Infrastructure Scale Optimizations
