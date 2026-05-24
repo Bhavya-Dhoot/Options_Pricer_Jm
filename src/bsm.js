@@ -37,7 +37,6 @@ export function normalCDF(x) {
 
 // ── Count trading days (Mon-Fri only) between two dates ──
 export function countTradingDays(startDate, endDate) {
-  let count = 0;
   const current = new Date(startDate);
   current.setHours(0, 0, 0, 0);
   const end = new Date(endDate);
@@ -45,13 +44,23 @@ export function countTradingDays(startDate, endDate) {
 
   if (end <= current) return 0;
 
-  const oneDay = 86400000;
-  let d = new Date(current.getTime() + oneDay);
-
-  while (d <= end) {
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) count++;
-    d = new Date(d.getTime() + oneDay);
+  const msPerDay = 86400000;
+  const daysDiff = Math.round((end - current) / msPerDay);
+  
+  const startDay = current.getDay(); // 0 is Sunday
+  
+  // Calculate full weeks mathematically O(1)
+  const fullWeeks = Math.floor(daysDiff / 7);
+  let remainingDays = daysDiff % 7;
+  
+  let count = fullWeeks * 5;
+  
+  // Add remaining days excluding weekends (max 6 iterations)
+  let d = startDay;
+  while (remainingDays > 0) {
+    d = (d + 1) % 7;
+    if (d !== 0 && d !== 6) count++;
+    remainingDays--;
   }
 
   return count;
@@ -231,21 +240,37 @@ export function strategyBSMPnL(legs, spot, T_remaining, iv, r, q) {
 }
 
 /**
- * Find breakevens numerically.
+ * Find breakevens numerically (Optimized Scan + Bisection).
  */
-export function findBreakevens(legs, spotMin, spotMax, steps = 10000) {
+export function findBreakevens(legs, spotMin, spotMax, scanSteps = 200) {
   const breakevens = [];
-  const stepSize = (spotMax - spotMin) / steps;
+  const stepSize = (spotMax - spotMin) / scanSteps;
   let prevPnL = strategyPayoffAtExpiry(legs, spotMin);
   
-  for (let i = 1; i <= steps; i++) {
+  for (let i = 1; i <= scanSteps; i++) {
     const spot = spotMin + i * stepSize;
     const currentPnL = strategyPayoffAtExpiry(legs, spot);
+    
     if (prevPnL * currentPnL < 0) {
-      // Sign change detected, approximate zero crossing via linear interpolation
-      const fraction = Math.abs(prevPnL) / (Math.abs(prevPnL) + Math.abs(currentPnL));
-      breakevens.push(spot - stepSize + fraction * stepSize);
-    } else if (currentPnL === 0 && prevPnL !== 0) {
+      // Sign change detected, isolate the root precisely via Bisection
+      let left = spot - stepSize;
+      let right = spot;
+      let mid = left;
+      let pnlLeft = strategyPayoffAtExpiry(legs, left);
+      
+      for (let j = 0; j < 20; j++) { // 20 steps yields ~1e-6 precision
+        mid = (left + right) / 2;
+        const pnlMid = strategyPayoffAtExpiry(legs, mid);
+        if (Math.abs(pnlMid) < 1e-10) break;
+        if (pnlLeft * pnlMid < 0) {
+          right = mid;
+        } else {
+          left = mid;
+          pnlLeft = pnlMid;
+        }
+      }
+      breakevens.push(mid);
+    } else if (Math.abs(currentPnL) < 1e-10 && Math.abs(prevPnL) >= 1e-10) {
       breakevens.push(spot);
     }
     prevPnL = currentPnL;
@@ -307,7 +332,7 @@ export function findMaxProfitLoss(legs, spotMin, spotMax, steps = 10000) {
 /**
  * Probability of Profit - Lognormal Integration
  */
-export function probabilityOfProfit(legs, S, T, r, q, iv, steps = 1000) {
+export function probabilityOfProfit(legs, S, T, r, q, iv, steps = 200) {
   if (T <= 0) return { pop: 0, ev: 0, pMaxProfit: 0, pMaxLoss: 0 };
   
   // Lognormal parameters

@@ -12,6 +12,7 @@ const TOTP_SECRET = process.env.ANGEL_TOTP_SECRET;
 const BASE_URL = 'https://apiconnect.angelbroking.com';
 
 let session = null;
+let renewalPromise = null;
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
@@ -26,38 +27,44 @@ const getHeaders = () => ({
 
 export async function getAngelSession() {
   if (session && session.jwtToken) {
-    // Optionally check if token is expired, but for now just return it
-    // If API calls fail with 401, we can clear session and retry
     return session;
+  }
+  if (renewalPromise) {
+    return renewalPromise;
   }
 
   if (!API_KEY || !CLIENT_ID || !PIN || !TOTP_SECRET) {
     throw new Error('Angel One credentials missing in .env');
   }
 
-  const { otp } = await TOTP.generate(TOTP_SECRET);
+  renewalPromise = (async () => {
+    try {
+      const { otp } = await TOTP.generate(TOTP_SECRET);
+      console.log('[Angel One] Authenticating...');
+      const response = await axios.post(`${BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword`, {
+        clientcode: CLIENT_ID,
+        password: PIN,
+        totp: otp
+      }, {
+        headers: getHeaders()
+      });
 
-  try {
-    console.log('[Angel One] Authenticating...');
-    const response = await axios.post(`${BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword`, {
-      clientcode: CLIENT_ID,
-      password: PIN,
-      totp: otp
-    }, {
-      headers: getHeaders()
-    });
-
-    if (response.data.status && response.data.data) {
-      session = response.data.data;
-      console.log('[Angel One] Authentication successful!');
-      return session;
-    } else {
-      throw new Error(response.data.message || 'Authentication failed');
+      if (response.data.status && response.data.data) {
+        session = response.data.data;
+        console.log('[Angel One] Authentication successful!');
+        return session;
+      } else {
+        throw new Error(response.data.message || 'Authentication failed');
+      }
+    } catch (error) {
+      console.error('[Angel One] Auth Error:', error.response?.data || error.message);
+      throw error;
+    } finally {
+      renewalPromise = null;
     }
-  } catch (error) {
-    console.error('[Angel One] Auth Error:', error.response?.data || error.message);
-    throw error;
-  }
+  })();
+
+  return renewalPromise;
 }
 
 export function clearSession() {
@@ -89,7 +96,8 @@ const API_LIMITS = {
   '/rest/secure/angelbroking/marketData/v1/optionGreek': { s: 1, m: Infinity, h: Infinity }
 };
 
-const requestQueue = [];
+let requestQueue = [];
+let queueHeadIndex = 0;
 let isProcessingQueue = false;
 const endpointTimestamps = new Map(); // Stores timestamps per endpoint
 
@@ -144,15 +152,15 @@ const processQueue = async () => {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
 
-  while (requestQueue.length > 0) {
-    const nextRequest = requestQueue[0];
+  while (queueHeadIndex < requestQueue.length) {
+    const nextRequest = requestQueue[queueHeadIndex];
     const requiredDelay = getRequiredDelay(nextRequest.endpoint);
     
     if (requiredDelay > 0) {
       await new Promise(resolve => setTimeout(resolve, requiredDelay + 10)); // +10ms padding
     }
     
-    const { endpoint, requestFn, resolve, reject } = requestQueue.shift();
+    const { endpoint, requestFn, resolve, reject } = requestQueue[queueHeadIndex++];
     endpointTimestamps.get(endpoint).push(Date.now());
     
     // Smoothly space out requests to prevent socket flooding or triggering micro-burst limits
@@ -170,8 +178,19 @@ const processQueue = async () => {
         }
         reject(error);
       });
+      
+    // GC Queue
+    if (queueHeadIndex > 1000) {
+      requestQueue = requestQueue.slice(queueHeadIndex);
+      queueHeadIndex = 0;
+    }
   }
 
+  if (queueHeadIndex >= requestQueue.length) {
+    requestQueue = [];
+    queueHeadIndex = 0;
+  }
+  
   isProcessingQueue = false;
 };
 

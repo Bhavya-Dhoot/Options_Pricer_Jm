@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import mongoSanitize from 'express-mongo-sanitize';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
 import { 
   initScripMaster, 
@@ -45,24 +46,11 @@ app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http:
 // Security Optimization: Payload limits & NoSQL Injection protection
 app.use(express.json({ limit: '10kb' }));
 
-// Custom NoSQL Sanitizer for Express 5 (where req.query is read-only)
-app.use((req, res, next) => {
-  const sanitize = (obj) => {
-    if (typeof obj !== 'object' || obj === null) return;
-    for (let key in obj) {
-      if (key.startsWith('$') || key.includes('.')) {
-        delete obj[key];
-      } else {
-        sanitize(obj[key]);
-      }
-    }
-  };
-  sanitize(req.body);
-  sanitize(req.params);
-  // Do not reassign req.query, just mutate the object directly if needed
-  if (req.query) sanitize(req.query);
-  next();
-});
+// Sanitize user-supplied data to prevent MongoDB Operator Injection
+// This safely strips out $ and . characters without permanently corrupting valid keys 
+app.use(mongoSanitize({
+  replaceWith: '_'
+}));
 
 // Security Optimization: Inbound Rate Limiting
 const authLimiter = rateLimit({

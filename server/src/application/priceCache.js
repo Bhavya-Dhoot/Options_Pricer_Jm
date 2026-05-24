@@ -56,10 +56,20 @@ export const startPriceCacheLoop = () => {
       const now = Date.now();
       // Garbage Collection: Remove symbols not requested in the last 10 minutes
       for (const sym of activeSymbols) {
-        if (now - (lastRequestTime[sym] || 0) > 600000) activeSymbols.delete(sym);
+        if (now - (lastRequestTime[sym] || 0) > 600000) {
+          activeSymbols.delete(sym);
+          delete lastRequestTime[sym];
+          delete lastPolledTime[sym];
+          delete lastSnapshotTime[sym];
+        }
       }
       for (const sym of prioritySymbols) {
-        if (now - (lastRequestTime[sym] || 0) > 600000) prioritySymbols.delete(sym);
+        if (now - (lastRequestTime[sym] || 0) > 600000) {
+          prioritySymbols.delete(sym);
+          delete lastRequestTime[sym];
+          delete lastPolledTime[sym];
+          delete lastSnapshotTime[sym];
+        }
       }
 
       const pQueue = Array.from(prioritySymbols);
@@ -105,11 +115,15 @@ export const startPriceCacheLoop = () => {
           const snapshotNow = Date.now();
           if (!lastSnapshotTime[targetSymbol] || snapshotNow - lastSnapshotTime[targetSymbol] >= 60000) {
             lastSnapshotTime[targetSymbol] = snapshotNow;
-            MarketSnapshot.create({
-              symbol: targetSymbol,
-              timestamp: new Date(snapshotNow),
-              data: data
-            }).catch(e => console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message));
+            try {
+              await MarketSnapshot.create({
+                symbol: targetSymbol,
+                timestamp: new Date(snapshotNow),
+                data: data
+              });
+            } catch (e) {
+              console.error(`[PriceCache] Failed to save snapshot for ${targetSymbol}:`, e.message);
+            }
           }
         } else {
           // Request was skipped because it's too fresh! NO quota consumed.
