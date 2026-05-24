@@ -4,6 +4,21 @@ import { getLatestPrice, registerSymbol, forceFetchLatestPrice } from './priceCa
 import { getLotSize } from '../../scripMaster.js';
 import { estimateMargin } from '../domain/marginCalculator.js';
 
+const parseExpiry = (expiryStr) => {
+  if (!expiryStr) return 0;
+  try {
+    const day = parseInt(expiryStr.slice(0, 2), 10);
+    const monthStr = expiryStr.slice(3, 6);
+    const year = parseInt(expiryStr.slice(7), 10);
+    const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+    const month = months[monthStr];
+    if (month === undefined) return 0;
+    return new Date(year, month, day).getTime();
+  } catch (e) {
+    return 0;
+  }
+};
+
 export const placeTrade = async (req, res) => {
   const { symbol, type, strike, expiry, action, orderType, limitPrice, qty } = req.body;
   
@@ -268,8 +283,10 @@ export const exitTrade = async (req, res) => {
     if (trade.user.toString() !== req.user._id.toString()) return res.status(401).json({ error: 'Unauthorized' });
     if (trade.status !== 'OPEN') return res.status(400).json({ error: 'Trade is not open' });
     
-    if (exitQty > trade.qty) return res.status(400).json({ error: 'Exit qty exceeds open qty' });
-    if (exitQty !== trade.qty) return res.status(400).json({ error: 'Partial exits are not supported in this version. Must exit full quantity.' });
+    const parsedExitQty = Number(exitQty);
+    if (isNaN(parsedExitQty) || parsedExitQty <= 0) return res.status(400).json({ error: 'Invalid exit quantity' });
+    if (parsedExitQty > trade.qty) return res.status(400).json({ error: 'Exit qty exceeds open qty' });
+    if (parsedExitQty !== trade.qty) return res.status(400).json({ error: 'Partial exits are not supported in this version. Must exit full quantity.' });
 
     // Server-Side Verification of Exit Price
     let verifiedExitPrice = 0;
@@ -287,9 +304,18 @@ export const exitTrade = async (req, res) => {
       verifiedExitPrice = liveData.data.spot;
     } else {
       const chain = liveData.data.byExpiry?.[trade.expiry];
-      if (!chain) return res.status(400).json({ error: 'Market data unavailable for this option expiry.' });
-      
-      const strikeData = chain.find(s => (s.strikePrice || s.strike) === trade.strike);
+      if (!chain) {
+        const expiryTime = parseExpiry(trade.expiry);
+        if (expiryTime && Date.now() > expiryTime + 86400000) {
+          // The option chain is missing because it expired.
+          // Force-settle at exact intrinsic value using the current spot price.
+          const spot = liveData.data.spot;
+          verifiedExitPrice = trade.type === 'call' ? Math.max(spot - trade.strike, 0) : Math.max(trade.strike - spot, 0);
+        } else {
+          return res.status(400).json({ error: 'Market data unavailable for this option expiry.' });
+        }
+      } else {
+        const strikeData = chain.find(s => (s.strikePrice || s.strike) === trade.strike);
       if (!strikeData) return res.status(400).json({ error: 'Market data unavailable for this strike.' });
       
       const optData = trade.type === 'call' ? strikeData.call : strikeData.put;
@@ -297,11 +323,12 @@ export const exitTrade = async (req, res) => {
       
       // MTM Exit: If we bought, we exit by selling to the Bid. If we sold, we exit by buying the Ask.
       verifiedExitPrice = trade.action === 'buy' ? (optData.bidPrice || optData.ltp) : (optData.askPrice || optData.ltp);
+      }
     }
 
     // Calculate PnL for this exit
     const direction = trade.action === 'buy' ? 1 : -1;
-    const pnl = direction * (verifiedExitPrice - trade.entryPrice) * exitQty * trade.lotSize;
+    const pnl = direction * (verifiedExitPrice - trade.entryPrice) * parsedExitQty * trade.lotSize;
     
     // Update User Capital
     // Update User Capital using atomic $inc to prevent concurrency race conditions

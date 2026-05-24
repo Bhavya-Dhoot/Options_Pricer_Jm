@@ -2,6 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { DollarSign, Briefcase, Activity, Clock, LogOut, ArrowUpRight } from 'lucide-react';
 import LiveStrategyBuilder from './LiveStrategyBuilder.jsx';
 
+const parseExpiry = (expiryStr) => {
+  if (!expiryStr) return 0;
+  try {
+    const day = parseInt(expiryStr.slice(0, 2), 10);
+    const monthStr = expiryStr.slice(3, 6);
+    const year = parseInt(expiryStr.slice(7), 10);
+    const months = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+    const month = months[monthStr];
+    if (month === undefined) return 0;
+    return new Date(year, month, day).getTime();
+  } catch (e) {
+    return 0;
+  }
+};
+
 export default function PaperTradeDashboard({ user, live, onLogout }) {
   const [profile, setProfile] = useState(user);
   const [trades, setTrades] = useState([]);
@@ -150,7 +165,16 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
       return data.spot || trade.entryPrice;
     } else {
       const chain = data.byExpiry?.[trade.expiry];
-      if (!chain) return trade.entryPrice;
+      if (!chain) {
+        // If chain is completely missing, check if it expired!
+        const expiryTime = parseExpiry(trade.expiry);
+        if (expiryTime && Date.now() > expiryTime + 86400000) {
+          // It has expired. Settle at intrinsic value
+          const spot = data.spot || trade.entryPrice;
+          return trade.type === 'call' ? Math.max(spot - trade.strike, 0) : Math.max(trade.strike - spot, 0);
+        }
+        return trade.entryPrice;
+      }
       const strikeData = chain.find(s => (s.strikePrice || s.strike) === trade.strike);
       if (!strikeData) return trade.entryPrice;
       const optData = trade.type === 'call' ? strikeData.call : strikeData.put;
