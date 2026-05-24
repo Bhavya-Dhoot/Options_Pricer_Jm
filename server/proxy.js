@@ -284,7 +284,15 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       return ltp;
     };
 
-    const strikeRecords = relevantStrikes.map(strike => {
+    const strikeRecords = [];
+    let bsmLoopCount = 0;
+    
+    for (const strike of relevantStrikes) {
+      // Event Loop Yielding (DoS Prevention): Yield CPU every 10 strikes to process concurrent web requests
+      if (++bsmLoopCount % 10 === 0) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      
       const record = { strikePrice: strike, call: null, put: null };
       
       const ceToken = strikesMap[strike].CE?.token;
@@ -333,8 +341,8 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
         };
       }
       
-      return record;
-    });
+      strikeRecords.push(record);
+    }
 
     const finalResponse = {
       spot: spotPrice,

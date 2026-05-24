@@ -1,4 +1,5 @@
 import User from '../domain/User.js';
+import Trade from '../domain/Trade.js';
 import jwt from 'jsonwebtoken';
 
 const generateToken = (id) => {
@@ -84,6 +85,12 @@ export const updateCapital = async (req, res) => {
       return res.status(400).json({ error: 'Invalid capital amount. Must be between 1K and 100Cr.' });
     }
     
+    // Ghost Capital Vulnerability Fix
+    const openTrades = await Trade.find({ user: req.user._id, status: 'OPEN' }).limit(1);
+    if (openTrades.length > 0) {
+      return res.status(400).json({ error: 'Cannot reset capital while holding open positions.' });
+    }
+
     const user = await User.findById(req.user._id);
     if (user) {
       user.virtualCapital = Number(virtualCapital);

@@ -157,6 +157,12 @@ A classic brokerage exploit allows users to establish highly leveraged Naked pos
 - **True SPAN Risk Sorting:** The holistic margin engine has been patched to aggressively sort and match short-legs by ATM/ITM proximity (Risk-Distance), accurately calculating worst-case scenarios for complex multi-leg asymmetric structures (like Broken Wing Butterflies) exactly as clearing houses do.
 - **Node.js V8 Heap Trimming:** Smashed a massive ~150MB+ RAM bloat vulnerability. The backend now performs immediate aggressive garbage collection (`scripMaster.length = 0`) right after parsing the 20MB Angel One OpenAPIScripMaster blob, and strictly trims the permanently cached option hash-maps to their bare minimum structures, eradicating GC CPU-spikes forever.
 
+### 13. Application Flow & Edge Case Hardening
+- **Event Loop DoS Prevention:** The Black-Scholes `solveImpliedIV` solver now uses an asynchronous iteration structure (`setImmediate` yielding) to parse deeply nested Option Chains, preventing the V8 Event Loop from mathematically locking up and starving active WebSockets under severe algorithmic load.
+- **Infinite Leverage Overload Block:** Trades are mathematically walled by a hard 5,000-lot maximum quantity cap and validated against `Number.MAX_SAFE_INTEGER` arithmetic buffer overflows, destroying potential integer-manipulation exploits.
+- **Ghost Capital Reset Wall:** The `updateCapital` API now securely executes an `OPEN` trade existence query before resetting user accounts, eradicating the vulnerability where users could infinitely reset negative capital whilst holding open toxic positions.
+- **Market Slippage Abort:** Batch and individual Execution Engines natively support `slippageTolerance`. Market orders dynamically tracking the Ask/Bid spread will instantaneously abort if real-world slippage mathematically breaches the user's explicit parameter bounds.
+
 ---
 
 ## Getting Started

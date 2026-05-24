@@ -44,10 +44,10 @@ const parseExpiry = (expiryStr) => {
 };
 
 export const placeTrade = async (req, res) => {
-  const { symbol, type, strike, expiry, action, orderType, limitPrice, qty } = req.body;
+  const { symbol, type, strike, expiry, action, orderType, limitPrice, qty, expectedPrice, slippageTolerance } = req.body;
   
-  if (!qty || !Number.isInteger(qty) || qty <= 0) {
-    return res.status(400).json({ error: 'Quantity must be a positive integer.' });
+  if (!qty || !Number.isInteger(qty) || qty <= 0 || qty > 5000) {
+    return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
   }
 
   const releaseLock = await acquireLock(req.user._id);
@@ -98,6 +98,14 @@ export const placeTrade = async (req, res) => {
         // If Buy, we pay the Ask. If Sell, we get the Bid.
         verifiedEntryPrice = action === 'buy' ? (optData.askPrice || optData.ltp) : (optData.bidPrice || optData.ltp);
       }
+      
+      // Slippage Tolerance Protection
+      if (expectedPrice && slippageTolerance) {
+        const deviation = Math.abs(verifiedEntryPrice - expectedPrice) / expectedPrice;
+        if (deviation > (slippageTolerance / 100)) {
+          return res.status(400).json({ error: `Price moved significantly. Expected ₹${expectedPrice}, Live is ₹${verifiedEntryPrice}. Order cancelled to prevent slippage.` });
+        }
+      }
     } else {
       verifiedEntryPrice = limitPrice;
     }
@@ -110,6 +118,10 @@ export const placeTrade = async (req, res) => {
       const liveData = getLatestPrice(symbol);
       const spot = liveData?.data?.spot || verifiedEntryPrice;
       estimatedMargin = spot * verifiedLotSize * 0.15 * qty; // Fix: 15% of underlying contract value
+    }
+
+    if (estimatedMargin > Number.MAX_SAFE_INTEGER || (verifiedEntryPrice * qty * verifiedLotSize) > Number.MAX_SAFE_INTEGER) {
+      return res.status(400).json({ error: 'Calculated order value exceeds system arithmetic limits.' });
     }
 
     // Dynamic Margin Check using holistic margin calculator for portfolio
@@ -164,7 +176,7 @@ export const placeTrade = async (req, res) => {
 };
 
 export const placeBatchTrades = async (req, res) => {
-  const { legs, symbol } = req.body;
+  const { legs, symbol, slippageTolerance } = req.body;
   if (!legs || !Array.isArray(legs) || legs.length === 0) {
     return res.status(400).json({ error: 'Valid legs array required.' });
   }
@@ -197,8 +209,8 @@ export const placeBatchTrades = async (req, res) => {
     const spot = liveData.data.spot;
 
     for (const leg of legs) {
-      if (!leg.qty || !Number.isInteger(leg.qty) || leg.qty <= 0) {
-        return res.status(400).json({ error: 'Quantity must be a positive integer.' });
+      if (!leg.qty || !Number.isInteger(leg.qty) || leg.qty <= 0 || leg.qty > 5000) {
+        return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
       }
       
       const verifiedLotSize = getLotSize(leg.symbol || baseSymbol);
@@ -218,6 +230,19 @@ export const placeBatchTrades = async (req, res) => {
         const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
         if (!optData) return res.status(400).json({ error: 'Option data unavailable.' });
         verifiedEntryPrice = leg.action === 'buy' ? (optData.askPrice || optData.ltp) : (optData.bidPrice || optData.ltp);
+      }
+      
+      // Slippage Tolerance Protection for Batch Trades
+      if (leg.expectedPrice && slippageTolerance) {
+        const deviation = Math.abs(verifiedEntryPrice - leg.expectedPrice) / leg.expectedPrice;
+        if (deviation > (slippageTolerance / 100)) {
+          return res.status(400).json({ error: `Price moved significantly on strike ${leg.strike}. Expected ₹${leg.expectedPrice}, Live is ₹${verifiedEntryPrice}. Batch order cancelled.` });
+        }
+      }
+      
+      // Safety Limit
+      if ((verifiedEntryPrice * leg.qty * verifiedLotSize) > Number.MAX_SAFE_INTEGER) {
+         return res.status(400).json({ error: 'Calculated order value exceeds system arithmetic limits.' });
       }
       
       verifiedLegs.push({
@@ -243,6 +268,10 @@ export const placeBatchTrades = async (req, res) => {
     const combinedLegs = [...allPortfolioLegs, ...verifiedLegs];
     const newMarginEst = estimateMargin(combinedLegs, spot, symbol);
     const newTotalMargin = newMarginEst.totalMarginRequired;
+    
+    if (newTotalMargin > Number.MAX_SAFE_INTEGER) {
+      return res.status(400).json({ error: 'Calculated margin exceeds system arithmetic limits.' });
+    }
 
     if (newTotalMargin > user.virtualCapital) {
       return res.status(400).json({ error: `Insufficient margin. Required: ₹${newTotalMargin.toFixed(0)}, Available: ₹${user.virtualCapital.toFixed(0)}` });
