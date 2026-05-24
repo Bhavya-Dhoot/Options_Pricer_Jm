@@ -142,6 +142,12 @@ To guarantee the highest fidelity during virtual trading, the engine refuses to 
 We eliminated all local TCP/HTTP loopbacks. The background daemon no longer queries its own Express router via `fetch`, but instead imports and natively executes the decoupled `fetchMarketDataChain` function directly at raw V8 engine speed.
 Simultaneously, the frontend features a custom `useDebounce` hook across all Live Strategy configuration sliders. The immensely heavy Black-Scholes 150-step 3D rendering loop is paused until the user stops typing for 300ms, guaranteeing a flawless 60 FPS UI experience.
 
+### 9. Catastrophic Database NaN Schema Evolution Protection
+During a deep mathematical edge-case audit, a vulnerability was neutralized involving schema evolution. Older active trades registered before `lotSize` was explicitly bound to the database possessed `trade.lotSize = undefined`. If closed, the engine mathematically resolved `PnL = NaN`, which, when injected into MongoDB's atomic `$inc` operator, permanently corrupted the `virtualCapital` ledger. The engine now features dynamic backwards-compatible inference and an absolute `isNaN(pnl)` hard-fault circuit breaker before database injection.
+
+### 10. True Market Bid/Ask Slippage Execution
+To emulate the harsh reality of options trading, the system stripped out artificial, fixed-percentage (0.5%) slippage overlays. Instead, the Execution Engine dynamically maps simulated Market Buy orders strictly to the real-time Ask Price, and Market Sell orders to the Bid Price. For extreme multi-leg batch trades (like 12-leg algorithmic spiders), the engine implements a strict 20-leg hard cap per sequence to permanently prevent malicious backend V8 event-loop exhaustion.
+
 ---
 
 ## Getting Started
