@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { TrendingUp, Clock, Layers } from 'lucide-react';
 import { premiumAt, generateThetaDecayCurve } from './bsm.js';
+import BsmWorker from './bsm.worker.js?worker';
 
 function fmt(v) { return '₹' + v.toFixed(2); }
 function sign(v) { return v >= 0 ? '+' : ''; }
@@ -76,10 +77,28 @@ function PriceScenario({ S, K, T, r, sigma, optionType, currentPremium, q }) {
 
 // ── Sub-card B — Theta Decay Chart ──
 function ThetaDecay({ S, K, calendarDays, r, sigma, optionType, currentPremium, q }) {
-  const curveData = useMemo(
-    () => generateThetaDecayCurve(S, K, calendarDays, r, sigma, optionType, q),
-    [S, K, calendarDays, r, sigma, optionType, q]
-  );
+  const workerRef = React.useRef(null);
+  const [curveData, setCurveData] = useState([]);
+
+  React.useEffect(() => {
+    workerRef.current = new BsmWorker();
+    workerRef.current.onmessage = (e) => {
+      if (e.data.id === 'theta' && e.data.result) {
+        setCurveData(e.data.result);
+      }
+    };
+    return () => workerRef.current.terminate();
+  }, []);
+
+  React.useEffect(() => {
+    if (workerRef.current) {
+      workerRef.current.postMessage({
+        id: 'theta',
+        type: 'GENERATE_CURVE',
+        params: { S, K, calendarDays, r, sigma, optionType, q }
+      });
+    }
+  }, [S, K, calendarDays, r, sigma, optionType, q]);
 
   // Key timeframes for table
   const timeframes = useMemo(() => {

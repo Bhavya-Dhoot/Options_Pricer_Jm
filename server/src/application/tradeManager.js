@@ -49,7 +49,7 @@ export const placeTrade = async (req, res) => {
     let verifiedEntryPrice = 0;
     
     if (orderType === 'market') {
-      let liveData = getLatestPrice(symbol);
+      let liveData = await getLatestPrice(symbol);
       
       // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
       if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
@@ -106,7 +106,7 @@ export const placeTrade = async (req, res) => {
     if (action === 'buy') {
       estimatedMargin = verifiedEntryPrice * qty * verifiedLotSize;
     } else {
-      const liveData = getLatestPrice(symbol);
+      const liveData = await getLatestPrice(symbol);
       const spot = liveData?.data?.spot || verifiedEntryPrice;
       estimatedMargin = spot * verifiedLotSize * 0.15 * qty; // Fix: 15% of underlying contract value
     }
@@ -139,7 +139,7 @@ export const placeTrade = async (req, res) => {
     const newLeg = { type, action, qty, lotSize: verifiedLotSize, strike, expiry, premium: verifiedEntryPrice };
     const combinedLegs = [...allPortfolioLegs, newLeg];
     
-    const liveDataForSpot = getLatestPrice(symbol);
+    const liveDataForSpot = await getLatestPrice(symbol);
     const spotForMargin = liveDataForSpot?.data?.spot || verifiedEntryPrice;
     
     const newMarginEst = estimateMargin(combinedLegs, spotForMargin, symbol);
@@ -198,7 +198,7 @@ export const placeBatchTrades = async (req, res) => {
     const baseSymbol = symbol || legs[0].symbol || 'NIFTY'; 
     registerSymbol(baseSymbol);
     
-    let liveData = getLatestPrice(baseSymbol);
+    let liveData = await getLatestPrice(baseSymbol);
     
     // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
     if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
@@ -356,7 +356,7 @@ export const getLivePrices = async (req, res) => {
     const prices = {};
     for (const sym of symbols) {
       registerSymbol(sym, isPriority); // Track symbol and its priority status
-      const cache = getLatestPrice(sym);
+      const cache = await getLatestPrice(sym);
       if (cache) {
         prices[sym] = cache.data;
       }
@@ -386,7 +386,7 @@ export const exitTrade = async (req, res) => {
 
     // Server-Side Verification of Exit Price
     let verifiedExitPrice = 0;
-    const liveData = getLatestPrice(trade.symbol);
+    const liveData = await getLatestPrice(trade.symbol);
     
     if (!liveData || !liveData.data) {
       await session.abortTransaction();

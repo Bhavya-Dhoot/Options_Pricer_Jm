@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceDot, Legend,
@@ -18,6 +18,7 @@ import {
 } from './bsm.js';
 import { useLiveData, useAvailableExpiries, findATMStrike, nseToISODate } from './useLiveData.js';
 import LiveFetchBar from './components/LiveFetchBar.jsx';
+import BsmWorker from './bsm.worker.js?worker';
 
 function fmt(v) { return '₹' + v.toFixed(2); }
 function sign(v) { return v >= 0 ? '+' : ''; }
@@ -434,16 +435,50 @@ function DecayCurveSection({ S, K, calendarDays, r, sigma, optionType, q, market
     solveImpliedIV(S, K, T, r, marketPremium, optionType, q).then(setImpliedIV);
   }, [S, K, calendarDays, r, marketPremium, optionType, q, hasMarket]);
 
-  // Generate BSM decay curve (yellow  -  using user's input IV)
-  const bsmCurve = useMemo(
-    () => generateThetaDecayCurve(S, K, calendarDays, r, sigma, optionType, q),
-    [S, K, calendarDays, r, sigma, optionType, q]
-  );
+  const workerRef = useRef(null);
+  const [bsmCurve, setBsmCurve] = useState([]);
+  const [marketCurve, setMarketCurve] = useState(null);
 
-  // Generate market-implied decay curve (purple  -  using solved IV)
-  const marketCurve = useMemo(() => {
-    if (!impliedIV) return null;
-    return generateThetaDecayCurve(S, K, calendarDays, r, impliedIV, optionType, q);
+  useEffect(() => {
+    workerRef.current = new BsmWorker();
+    workerRef.current.onmessage = (e) => {
+      const { id, result, error } = e.data;
+      if (error) {
+        console.error("BSM Worker Error:", error);
+        return;
+      }
+      if (id === 'bsm') setBsmCurve(result);
+      if (id === 'market') setMarketCurve(result);
+    };
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+      }
+    };
+  }, []);
+
+  // Generate BSM decay curve (yellow - using user's input IV)
+  useEffect(() => {
+    if (workerRef.current) {
+      workerRef.current.postMessage({
+        id: 'bsm',
+        type: 'GENERATE_CURVE',
+        params: { S, K, calendarDays, r, sigma, optionType, q }
+      });
+    }
+  }, [S, K, calendarDays, r, sigma, optionType, q]);
+
+  // Generate market-implied decay curve (purple - using solved IV)
+  useEffect(() => {
+    if (workerRef.current && impliedIV) {
+      workerRef.current.postMessage({
+        id: 'market',
+        type: 'GENERATE_CURVE',
+        params: { S, K, calendarDays, r, sigma: impliedIV, optionType, q }
+      });
+    } else {
+      setMarketCurve(null);
+    }
   }, [S, K, calendarDays, r, impliedIV, optionType, q]);
 
   // Merge both curves into one dataset for the chart

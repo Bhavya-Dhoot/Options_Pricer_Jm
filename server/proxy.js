@@ -5,6 +5,9 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import { createClient } from 'redis';
 import mongoSanitize from 'express-mongo-sanitize';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
 import { 
@@ -34,6 +37,16 @@ const ivCache = new Map();
 const app = express();
 app.set('trust proxy', 1); // CRITICAL FOR PRODUCTION: Trust Load Balancer IPs for Rate Limiting
 const PORT = process.env.PORT || 3001;
+
+const server = http.createServer(app);
+export const io = new SocketIOServer(server, {
+  cors: { origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'], credentials: true }
+});
+
+// Redis Configuration
+export const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+redisClient.on('error', (err) => console.log('[Redis] Client Error', err));
+redisClient.connect().then(() => console.log('[Redis] Connected')).catch(() => console.log('[Redis] Connection Failed'));
 
 // Security Optimization: HTTP Headers
 app.use(helmet({
@@ -98,12 +111,8 @@ getAngelSession().then(() => {
   console.error("Angel One initial auth failed:", err.message);
 });
 
-// Cache
-let cache = {
-  data: null,
-  timestamp: 0,
-  symbol: null
-};
+// Fallback Map Cache if Redis is unavailable
+export const chainCache = new Map();
 
 // Helper to format Angel One expiry strings (e.g. 26MAY2026 -> 26-May-2026)
 export function formatExpiry(angelExp) {
@@ -123,8 +132,8 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
 
   const spotExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BSE' : 'NSE';
 
-  // OPTIMIZATION: Use cached spot price to estimate ATM strikes to save an API call
-  let approxSpot = (cache.data && cache.symbol === symbol) ? cache.data.spot : null;
+  const cached = chainCache.get(symbol);
+  let approxSpot = cached ? cached.data.spot : null;
   
   if (!approxSpot) {
     const spotQuote = await smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
@@ -357,7 +366,14 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
       }
     };
 
-    cache = { data: finalResponse, timestamp: Date.now(), symbol };
+    if (redisClient.isOpen) {
+      await redisClient.setEx(`chain:${symbol}`, 15, JSON.stringify(finalResponse));
+    }
+    chainCache.set(symbol, { data: finalResponse, timestamp: Date.now() });
+
+    // Broadcast tick diffs (1KB) instead of 100KB polling payload
+    io.emit('market_tick', { symbol, spot: spotPrice, timestamp: finalResponse.timestamp });
+    
     return finalResponse;
 }
 
@@ -369,8 +385,18 @@ app.get('/api/option-chain', async (req, res) => {
 
   console.log(`[/api/option-chain] Request for ${symbol}`);
 
-  if (!force && cache.data && cache.symbol === symbol && (Date.now() - cache.timestamp < 15000)) {
-    return res.json(cache.data);
+  if (!force) {
+    if (redisClient.isOpen) {
+      const cachedStr = await redisClient.get(`chain:${symbol}`);
+      if (cachedStr) {
+        return res.json(JSON.parse(cachedStr));
+      }
+    } else {
+      const cached = chainCache.get(symbol);
+      if (cached && (Date.now() - cached.timestamp < 15000)) {
+        return res.json(cached.data);
+      }
+    }
   }
 
   try {
@@ -403,7 +429,7 @@ app.get('/*path', (req, res) => {
   res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`[Proxy] Server running on port ${PORT}`);
-  console.log(`[Proxy] Using Angel One SmartAPI`);
+  console.log(`[Proxy] Using Angel One SmartAPI and Socket.io`);
 });

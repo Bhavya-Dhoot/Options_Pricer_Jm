@@ -1,7 +1,7 @@
 import { smartApiRequest } from '../../angelOneAuth.js';
 import { getFutureToken, getOptionTokens, getUnderlyingToken } from '../../scripMaster.js';
 import { MarketSnapshot } from '../domain/MarketSnapshot.js';
-import { fetchMarketDataChain } from '../../proxy.js';
+import { fetchMarketDataChain, redisClient, chainCache } from '../../proxy.js';
 
 // Global cache
 // { "NIFTY": { spot: 24500, iv: 0.15, optionChain: [...], futures: {...}, timestamp: 123456 } }
@@ -24,13 +24,21 @@ export const registerSymbol = (symbol, isPriority = false) => {
   }
 };
 
-export const getLatestPrice = (symbol) => {
+export const getLatestPrice = async (symbol) => {
+  if (redisClient.isOpen) {
+    const cached = await redisClient.get(`chain:${symbol.toUpperCase()}`);
+    if (cached) return { data: JSON.parse(cached), timestamp: Date.now() };
+  }
   return priceCache[symbol.toUpperCase()] || null;
 };
 
 export const forceFetchLatestPrice = async (symbol) => {
   const sym = symbol.toUpperCase();
   const data = await fetchMarketDataChain(sym, null, null);
+  
+  if (redisClient.isOpen) {
+    await redisClient.setEx(`chain:${sym}`, 15, JSON.stringify(data));
+  }
   priceCache[sym] = {
     data: data,
     timestamp: Date.now()

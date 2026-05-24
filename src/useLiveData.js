@@ -9,8 +9,10 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { io } from 'socket.io-client';
 
 const API_BASE = '/api'; // Vite proxy forwards to localhost:3001
+const socket = io(); // Connects to the same host natively
 
 // IST market hours: 9:15 AM – 3:30 PM (UTC+5:30)
 function isMarketHours() {
@@ -83,18 +85,30 @@ export function useLiveData() {
     stopAutoRefresh();
     setIsLive(true);
 
-    // Fetch immediately with force (user-initiated)
+    // Fetch full payload once
     fetchNow(symbol, { force: true });
 
+    // Fallback polling for full updates
     intervalRef.current = setInterval(() => {
-      // Only fetch during market hours to avoid unnecessary requests
       if (isMarketHours()) {
-        fetchNow(symbol, { force: false }); // cache ok for background polling
+        fetchNow(symbol, { force: false });
       }
     }, intervalMs);
+    
+    // Subscribe to rapid tiny WebSocket diffs
+    socket.on('market_tick', (tick) => {
+      if (tick.symbol === symbol) {
+        setData(prev => {
+          if (!prev) return null;
+          return { ...prev, spot: tick.spot, timestamp: tick.timestamp };
+        });
+      }
+    });
+
   }, [fetchNow]);
 
   const stopAutoRefresh = useCallback(() => {
+    socket.off('market_tick');
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;

@@ -393,7 +393,7 @@ export async function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0,
   if (marketPrice < intrinsic) return null;
 
   let sigma = initialGuess; // Warm-Start optimization
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 5; i++) {
     // Thread Yielding (DoS Prevention): Let the Node Event Loop breathe
     if (i % 10 === 0) {
       await new Promise(resolve => setImmediate(resolve));
