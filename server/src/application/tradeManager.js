@@ -98,7 +98,7 @@ export const placeTrade = async (req, res) => {
         }
       }
     } else {
-      verifiedEntryPrice = limitPrice;
+      verifiedEntryPrice = Number(limitPrice);
     }
 
     // Calculate exact margin required for this trade

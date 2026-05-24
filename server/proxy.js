@@ -32,6 +32,7 @@ const __dirname = path.dirname(__filename);
 const ivCache = new Map();
 
 const app = express();
+app.set('trust proxy', 1); // CRITICAL FOR PRODUCTION: Trust Load Balancer IPs for Rate Limiting
 const PORT = process.env.PORT || 3001;
 
 // Security Optimization: HTTP Headers
