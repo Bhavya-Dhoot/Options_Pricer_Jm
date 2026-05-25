@@ -437,6 +437,57 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
             ))}
           </tbody>
         </table>
+      <div className="flex items-center justify-between mb-4 mt-12">
+        <h3 className="text-lg font-semibold text-[#e6edf3]">P&L Ledger (Completed Trades)</h3>
+      </div>
+      <div className="card overflow-hidden mb-8">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-[#161b22] border-b border-[#30363d]">
+            <tr>
+              <th className="p-4 text-[#8b949e] font-semibold">Trade Details</th>
+              <th className="p-4 text-[#8b949e] font-semibold">Action</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">Qty</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">Entry</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">Exit</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">Realized P&L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {closedTrades.length === 0 ? (
+              <tr><td colSpan="6" className="p-4 text-center text-[#8b949e]">No completed trades found.</td></tr>
+            ) : closedTrades.map(trade => (
+              <tr key={trade._id} className="border-b border-[#30363d]/50 hover:bg-[#161b22]/50 transition-colors">
+                <td className="p-4">
+                  <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
+                  <div className="text-xs text-[#8b949e]">
+                    {trade.expiry || 'SPOT'} {trade.type.toUpperCase()} {trade.strike ? trade.strike : ''}
+                  </div>
+                  <div className="text-[10px] text-gray-500 mt-1" title="Unique Trade Hash for Audit">ID: {trade._id}</div>
+                </td>
+                <td className="p-4">
+                  <span className={`px-2 py-1 rounded text-xs font-bold ${trade.action === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                    {trade.action.toUpperCase()}
+                  </span>
+                </td>
+                <td className="p-4 text-right">
+                  <div className="font-mono text-[#e6edf3]">{trade.qty * (trade.lotSize || 1)}</div>
+                  <div className="text-xs text-[#8b949e]">{trade.qty} Lots</div>
+                </td>
+                <td className="p-4 text-right">
+                  <div className="font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</div>
+                  <div className="text-[10px] text-gray-500">{new Date(trade.entryTime).toLocaleString()}</div>
+                </td>
+                <td className="p-4 text-right">
+                  <div className="font-mono text-[#e6edf3]">₹{trade.exitPrice?.toFixed(2)}</div>
+                  <div className="text-[10px] text-gray-500">{new Date(trade.exitTime).toLocaleString()}</div>
+                </td>
+                <td className={`p-4 text-right font-mono font-bold ${trade.realizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {trade.realizedPnL >= 0 ? '+' : ''}₹{trade.realizedPnL?.toFixed(2) || '0.00'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
