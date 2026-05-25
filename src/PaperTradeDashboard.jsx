@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Briefcase, Activity, Clock, LogOut, ArrowUpRight } from 'lucide-react';
+import { DollarSign, Briefcase, Activity, Clock, LogOut, ArrowUpRight, AlertTriangle } from 'lucide-react';
 import LiveStrategyBuilder from './LiveStrategyBuilder.jsx';
+import { estimateMargin } from './utils/marginCalculator.js';
 
 const parseExpiry = (expiryStr) => {
   if (!expiryStr) return 0;
@@ -204,6 +205,20 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     return { ...trade, liveLTP, pnl, lotSize };
   });
 
+  const marginPortfolioLegs = openTrades.map(t => ({
+    type: t.type,
+    action: t.action,
+    qty: t.qty,
+    lotSize: t.lotSize,
+    strike: t.strike,
+    expiry: t.expiry,
+    premium: t.entryPrice
+  }));
+  const spotForMargin = openTrades.length > 0 ? (livePrices[openTrades[0].symbol]?.spot || live.data?.spot || openTrades[0].entryPrice) : 0;
+  const usedMargin = openTrades.length > 0 ? estimateMargin(marginPortfolioLegs, spotForMargin, openTrades[0].symbol).totalMarginRequired : 0;
+  const virtualCapital = profile?.virtualCapital || 0;
+  const marginUtilizationPct = virtualCapital > 0 ? (usedMargin / virtualCapital) * 100 : 0;
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
@@ -223,6 +238,24 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
           <LogOut size={16} /> Logout
         </button>
       </div>
+
+      {marginUtilizationPct >= 90 && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/50 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="text-red-500" size={24} />
+            <div>
+              <h3 className="text-red-500 font-bold">Margin Call Warning (Utilization: {marginUtilizationPct.toFixed(1)}%)</h3>
+              <p className="text-red-400 text-sm mt-0.5">Your open positions are dangerously close to exhausting your Available Cash margin. If you hit 100%, you cannot open new positions or hedge.</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => handleUpdateCapital(virtualCapital + 100000)}
+            className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-lg transition-colors whitespace-nowrap shadow-lg shadow-red-500/20"
+          >
+            + Add ₹1,00,000
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div className="card p-5 relative group">

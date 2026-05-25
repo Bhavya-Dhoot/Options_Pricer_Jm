@@ -145,11 +145,24 @@ export const placeTrade = async (req, res) => {
     const newMarginEst = estimateMargin(combinedLegs, spotForMargin, symbol);
     const newTotalMargin = newMarginEst.totalMarginRequired;
 
-    if (newTotalMargin > user.virtualCapital) {
-      await session.abortTransaction();
-      return res.status(400).json({ error: `Insufficient margin. Required: ₹${newTotalMargin.toFixed(0)}, Available: ₹${user.virtualCapital.toFixed(0)}` });
+    let cashflow = 0;
+    if (type !== 'future') {
+       cashflow = (action === 'buy' ? -1 : 1) * verifiedEntryPrice * qty * verifiedLotSize;
     }
-    
+
+    const postTradeCapital = user.virtualCapital + cashflow;
+
+    if (newTotalMargin > postTradeCapital) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: `Insufficient margin/capital. Required: ₹${newTotalMargin.toFixed(0)}, Available after premium: ₹${postTradeCapital.toFixed(0)}` });
+    }
+
+    await User.updateOne(
+      { _id: req.user._id },
+      { $inc: { virtualCapital: cashflow } },
+      { session }
+    );
+
     // Create the trade within the active session
     const trade = await Trade.create([{
       user: req.user._id,
@@ -304,10 +317,25 @@ export const placeBatchTrades = async (req, res) => {
       return res.status(400).json({ error: 'Calculated margin exceeds system arithmetic limits.' });
     }
 
-    if (newTotalMargin > user.virtualCapital) {
+    let totalCashflow = 0;
+    verifiedLegs.forEach(leg => {
+      if (leg.type !== 'future') {
+         totalCashflow += (leg.action === 'buy' ? -1 : 1) * leg.entryPrice * leg.qty * leg.lotSize;
+      }
+    });
+
+    const postTradeCapital = user.virtualCapital + totalCashflow;
+
+    if (newTotalMargin > postTradeCapital) {
       await session.abortTransaction();
-      return res.status(400).json({ error: `Insufficient margin. Required: ₹${newTotalMargin.toFixed(0)}, Available: ₹${user.virtualCapital.toFixed(0)}` });
+      return res.status(400).json({ error: `Insufficient margin/capital. Required: ₹${newTotalMargin.toFixed(0)}, Available after premium: ₹${postTradeCapital.toFixed(0)}` });
     }
+
+    await User.updateOne(
+      { _id: req.user._id },
+      { $inc: { virtualCapital: totalCashflow } },
+      { session }
+    );
     
     // Create all trades atomically
     const tradeDocs = verifiedLegs.map(leg => ({
@@ -449,6 +477,13 @@ export const exitTrade = async (req, res) => {
     // Safety check to prevent NaN propagation to MongoDB
     if (isNaN(pnl)) { await session.abortTransaction(); return res.status(400).json({ error: 'Critical calculation error: Resulting PnL is NaN' }); }
 
+    let exitCashflow = 0;
+    if (trade.type !== 'future') {
+      exitCashflow = (trade.action === 'buy' ? 1 : -1) * verifiedExitPrice * parsedExitQty * lotSize;
+    } else {
+      exitCashflow = pnl;
+    }
+
     // --- MARGIN EXPLOIT PROTECTION (Simulated Exit Portfolio Validation) ---
     const user = await User.findById(req.user._id);
     if (!user) { await session.abortTransaction(); return res.status(404).json({ error: 'User not found' }); }
@@ -469,7 +504,7 @@ export const exitTrade = async (req, res) => {
       
       const newMarginEst = estimateMargin(simulatedPortfolioLegs, liveData.data.spot || trade.entryPrice, trade.symbol);
       const newTotalMargin = newMarginEst.totalMarginRequired;
-      const simulatedCapital = user.virtualCapital + pnl;
+      const simulatedCapital = user.virtualCapital + exitCashflow;
 
       if (newTotalMargin > simulatedCapital) {
         await session.abortTransaction();
@@ -483,7 +518,7 @@ export const exitTrade = async (req, res) => {
     // Update User Capital using ACID Transaction
     await User.updateOne(
       { _id: req.user._id },
-      { $inc: { realizedPnL: pnl, virtualCapital: pnl } },
+      { $inc: { realizedPnL: pnl, virtualCapital: exitCashflow } },
       { session }
     );
 
