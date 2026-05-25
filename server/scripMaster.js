@@ -23,6 +23,15 @@ const parseDate = (dStr) => {
   return new Date(year, months[monthStr] || 0, day).getTime();
 };
 
+let initPromise = null;
+
+export function ensureScripMasterInitialized() {
+  if (!initPromise) {
+    initPromise = initScripMaster();
+  }
+  return initPromise;
+}
+
 export async function initScripMaster() {
   if (scripMaster.length > 0) return;
   console.log('[ScripMaster] Downloading OpenAPIScripMaster.json... (this may take a moment)');

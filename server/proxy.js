@@ -11,7 +11,7 @@ import { createClient } from 'redis';
 import mongoSanitize from 'express-mongo-sanitize';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
 import { 
-  initScripMaster, 
+  ensureScripMasterInitialized,
   getUnderlyingToken, 
   getOptionTokens, 
   getAvailableExpiries, 
@@ -114,7 +114,7 @@ app.use('/api/agent', agentRoutes);
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // Initialize Scrip Master on startup
-initScripMaster().catch(err => {
+ensureScripMasterInitialized().catch(err => {
   console.error("Failed to initialize Scrip Master:", err);
 });
 

@@ -5,7 +5,8 @@ import {
   getAvailableExpiries, 
   getFutureToken,
   getAvailableFutureExpiries,
-  getLotSize 
+  getLotSize,
+  ensureScripMasterInitialized
 } from '../../scripMaster.js';
 import { solveImpliedIV } from '../../../src/bsm.js';
 import { redisClient, io } from '../../proxy.js';
@@ -27,6 +28,7 @@ export function formatExpiry(angelExp) {
 }
 
 export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
+  await ensureScripMasterInitialized();
   symbol = symbol?.toUpperCase() || 'NIFTY';
   
   const spotToken = getUnderlyingToken(symbol);
