@@ -220,6 +220,11 @@ export const placeBatchTrades = async (req, res) => {
         await session.abortTransaction();
         return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
       }
+
+      if (leg.symbol && leg.symbol.toUpperCase() !== baseSymbol.toUpperCase()) {
+        await session.abortTransaction();
+        return res.status(400).json({ error: `Batch trades cannot mix symbols. Expected ${baseSymbol} but got ${leg.symbol}.` });
+      }
       
       if (leg.orderType === 'limit') {
         const pLimit = Number(leg.limitPrice);
