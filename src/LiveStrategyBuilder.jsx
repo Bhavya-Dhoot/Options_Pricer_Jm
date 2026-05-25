@@ -114,15 +114,17 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
           spotPrice={live.data?.spot} 
           symbol={live.data?.symbol}
           onApply={(newLegs) => {
-            const appliedLegs = newLegs.map((l, idx) => ({
-              ...l,
-              id: `tpl-${Date.now()}-${idx}`,
-              qty: 1,
-              lotSize: getLotSize(live.data?.symbol),
-              expiry: targetExpiry || live.data?.expiryDates?.[0],
-              premium: 0 // auto-updates from useEffect binding
-            }));
-            setLegs(appliedLegs);
+            setLegs(prev => {
+              return newLegs.map((l, idx) => ({
+                ...l,
+                id: `tpl-${Date.now()}-${idx}`,
+                qty: 1,
+                lotSize: getLotSize(live.data?.symbol, live.data?.lotSize),
+                T: calculateDTE(targetExpiry || live.data?.expiryDates?.[0]) / 365,
+                expiry: targetExpiry || live.data?.expiryDates?.[0],
+                premium: 0
+              }));
+            });
           }} 
         />
       )}

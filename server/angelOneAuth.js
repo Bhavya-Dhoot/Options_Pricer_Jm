@@ -200,6 +200,7 @@ const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
 const executeAxiosRequest = async (endpoint, payload, jwtToken) => {
   const response = await axios.post(`${BASE_URL}${endpoint}`, payload, {
     httpsAgent,
+    timeout: 5000, // <--- ADDED TIMEOUT
     headers: {
       ...getHeaders(),
       'Authorization': `Bearer ${jwtToken}`

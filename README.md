@@ -187,6 +187,8 @@ A classic brokerage exploit allows users to establish highly leveraged Naked pos
 - **Reverse Proxy Blindness Fix:** The Express rate limiter is explicitly configured with `app.set('trust proxy', 1)`. This forces Node.js to accurately parse `X-Forwarded-For` headers from AWS ALB, Render, or Cloudflare, permanently preventing global DoS lockouts across the entire userbase during traffic spikes.
 - **Load Balancer Socket Hangup Fix:** Tuned `server.keepAliveTimeout` and `server.headersTimeout` above 60 seconds to completely eradicate intermittent `502 Bad Gateway` errors caused by Express aggressively killing idle sockets prematurely out-of-sync with Nginx load balancers.
 - **Thundering Herd JWT Shield:** An algorithmic lock (`isRenewing`) synchronizes massive bursts of concurrent `401 Expired Token` websocket errors. Sibling threads suspend and wait gracefully while the primary thread requests a fresh Angel One token, comprehensively blocking `/loginByPassword` API spam.
+- **Silent TCP Deadlock Prevention:** The underlying Axios HTTP Engine is augmented with a hard 5000ms timeout circuit breaker. This permanently blocks silent API deadlocks where remote servers drop packets without closing the TCP connection, preventing the Node.js `Promise.all` event loop from hanging infinitely during chunked market data fetches.
+- **WebSocket React State Race-Condition Fix:** Refactored the `LiveStrategyBuilder` engine to use purely functional React state updates (`setLegs(prev => ...)`). This ensures rapid pre-made strategy injections merge flawlessly into the component tree and cannot be accidentally overwritten or wiped by extreme-frequency (10+ ticks/sec) incoming WebSocket state re-renders.
 
 ---
 

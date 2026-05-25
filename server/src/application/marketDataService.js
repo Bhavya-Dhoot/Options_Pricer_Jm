@@ -137,7 +137,7 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
   for (let i = 0; i < tokensToFetch.length; i += chunkSize) {
     const chunk = tokensToFetch.slice(i, i + chunkSize);
     fetchPromises.push(
-      smartApiRequest('/rest/secure/angelbroking/market/v1/quote/', {
+      smartApiRequest('/rest/secure/angelbroking/market/v1/quote', {
         mode: 'FULL',
         exchangeTokens: {
           [spotExchange]: [spotToken], // Spot is attached to every chunk to guarantee synchronization
