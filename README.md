@@ -38,7 +38,9 @@ To ensure mathematical perfection across edge-cases, the engine includes strict 
 
 ### ⚡ Unified Paper Trading Terminal
 The Strategy Builder is deeply integrated into the Paper Trading Dashboard. Unauthenticated users get a pure mathematical sandbox, while authenticated users can save custom templates, utilize 1-click strategy generation (Straddles, Spreads, Condors), and execute virtual trades seamlessly into a MongoDB portfolio with real-time MTM (Mark-To-Market) tracking.
-
+- **Immutable P&L Ledger & Audit Trail:** A permanent ledger tracks all closed positions with exact entry/exit pricing, lifecycle timestamps, and absolute MongoDB Trade ID hashes to guarantee execution transparency and auditability.
+- **Global Portfolio Escape Hatch:** A 1-click "Close All Positions" market escape trigger allows sequential, instantaneous portfolio flattening during extreme volatility.
+- **Auto-Login JWT Session Persistence:** Secure, silent background re-hydration polling using `localStorage` ensures that active paper trading sessions persist seamlessly across browser reloads or tab restorations without forcing re-authentication.
 ### 🤖 Headless Agent-as-a-Service (AaaS) API
 The backend exposes a heavily decoupled, headless **Agent API Layer** designed for advanced AI Agents and LLMs:
 - **Token-Optimized Compression**: Market payloads (`/api/agent/chain`) are mathematically compressed into ultra-dense JSON (stripping noise and deep order book arrays), intentionally designed to fit inside LLM Context Windows without hitting token limits.
