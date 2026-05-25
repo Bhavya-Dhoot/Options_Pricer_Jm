@@ -80,14 +80,16 @@ export const startPriceCacheLoop = () => {
       let targetSymbol = null;
       reqCount++;
 
-      // Dynamic Ratio: Increase priority intensity if there are many priority symbols
-      let ratio = 3; // default 1 priority out of every 3
+      // Dynamic Ratio: Ensure priority gets faster updates but NEVER starves regular users
+      let priorityWeight = 1; // default 1 priority for every 1 regular (50% slice)
       if (pQueue.length > 0 && rQueue.length > 0) {
-        if (pQueue.length >= rQueue.length) ratio = 2; // 1 out of 2
-        if (pQueue.length >= rQueue.length * 3) ratio = 1; // 100% priority
+        if (pQueue.length >= rQueue.length) priorityWeight = 2; // 2 priority for 1 regular (66% slice)
+        if (pQueue.length >= rQueue.length * 3) priorityWeight = 3; // 3 priority for 1 regular (75% slice max)
       }
 
-      const isPriorityTurn = pQueue.length > 0 && (rQueue.length === 0 || reqCount % ratio === 0 || ratio === 1);
+      // If priorityWeight is 3, then reqCount % 4 will be 1, 2, 3 (priority) and 0 (regular)
+      const cycleLength = priorityWeight + 1;
+      const isPriorityTurn = pQueue.length > 0 && (rQueue.length === 0 || (reqCount % cycleLength !== 0));
 
       if (isPriorityTurn) {
         pIndex = (pIndex + 1) % pQueue.length;
