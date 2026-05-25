@@ -166,7 +166,7 @@ export const placeTrade = async (req, res) => {
       entryPrice: orderType === 'market' ? verifiedEntryPrice : null,
       entryTime: orderType === 'market' ? Date.now() : null,
       status: orderType === 'market' ? 'OPEN' : 'PENDING'
-    }], { session });
+    }], { session, ordered: true });
 
     await session.commitTransaction();
     res.status(201).json(trade[0]);
@@ -321,7 +321,7 @@ export const placeBatchTrades = async (req, res) => {
         status: 'OPEN'
     }));
     
-    const newTrades = await Trade.create(tradeDocs, { session });
+    const newTrades = await Trade.create(tradeDocs, { session, ordered: true });
 
     await session.commitTransaction();
     res.status(201).json(newTrades);
