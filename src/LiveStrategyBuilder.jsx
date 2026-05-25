@@ -34,7 +34,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
       
       {/* Top Bar: Controls */}
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-        <LiveFetchBar onFetch={handleFetch} isLoading={live.isLoading} error={live.error} />
+        <LiveFetchBar live={live} onFetch={handleFetch} />
         
         <div className="flex gap-4 flex-wrap">
           <div className="flex flex-col gap-2 min-w-[160px] bg-[#161b22] border border-[#30363d] p-2 rounded-xl">

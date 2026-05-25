@@ -3,9 +3,10 @@ import { Radio, Wifi, WifiOff, Loader2, AlertTriangle } from 'lucide-react';
 import TickerSearch from './TickerSearch.jsx';
 import { useLiveData } from '../useLiveData.js';
 
-export default function LiveFetchBar({ onFetchComplete }) {
-  const live = useLiveData();
-  const [symbol, setSymbol] = useState('NIFTY');
+export default function LiveFetchBar({ live: externalLive, onFetch, onFetchComplete }) {
+  const internalLive = useLiveData();
+  const live = externalLive || internalLive;
+  const [symbol, setSymbol] = useState(live?.data?.symbol || 'NIFTY');
   const [timeSinceUpdate, setTimeSinceUpdate] = useState(0);
 
   useEffect(() => {
@@ -20,9 +21,14 @@ export default function LiveFetchBar({ onFetchComplete }) {
   const handleFetchLive = async (sym = symbol) => {
     const s = (typeof sym === 'string' ? sym : symbol).trim().toUpperCase();
     if (!s) return;
-    const chain = await live.fetchNow(s);
-    if (chain && onFetchComplete) {
-      onFetchComplete(chain, s);
+    
+    if (onFetch) {
+      await onFetch(s);
+    } else if (live) {
+      const chain = await live.fetchNow(s);
+      if (chain && onFetchComplete) {
+        onFetchComplete(chain, s);
+      }
     }
   };
 
