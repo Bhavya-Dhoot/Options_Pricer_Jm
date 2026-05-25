@@ -71,10 +71,13 @@ app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http:
 app.use(express.json({ limit: '10kb' }));
 
 // Sanitize user-supplied data to prevent MongoDB Operator Injection
-// This safely strips out $ and . characters without permanently corrupting valid keys 
-app.use(mongoSanitize({
-  replaceWith: '_'
-}));
+// Explicit in-place mutation to fix Express 5 "getter only" crash on req.query
+app.use((req, res, next) => {
+  ['body', 'query', 'params'].forEach(key => {
+    if (req[key]) mongoSanitize.sanitize(req[key], { replaceWith: '_' });
+  });
+  next();
+});
 
 // Security Optimization: Inbound Rate Limiting
 const authLimiter = rateLimit({
