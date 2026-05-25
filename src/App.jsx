@@ -25,6 +25,24 @@ export default function App() {
   // Auto-fetch in background to hydrate liveData if available
   useEffect(() => {
     live.fetchNow('NIFTY', { force: false }).catch(() => {});
+    
+    // Auto-login persistence using stored token
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      fetch('/api/auth/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Invalid token');
+      })
+      .then(data => {
+        if (data && data._id) setUser(data);
+      })
+      .catch(() => {
+        localStorage.removeItem('auth_token');
+      });
+    }
   }, []);
 
   return (
