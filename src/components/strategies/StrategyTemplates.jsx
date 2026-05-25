@@ -1,88 +1,20 @@
 import React from 'react';
 import { LayoutTemplate, ChevronRight } from 'lucide-react';
+import { STRATEGIES } from '../../strategyDefinitions.js';
 
-const TEMPLATES = [
-  {
-    id: 'straddle',
-    name: 'Long Straddle',
-    desc: 'Buy ATM Call & ATM Put. Profits from high volatility in either direction.',
-    color: 'text-purple-400',
-    bg: 'bg-purple-500/10',
-    border: 'border-purple-500/20',
-    buildLegs: (spot, step) => {
-      const atm = Math.round(spot / step) * step;
-      return [
-        { type: 'call', action: 'buy', strike: atm, qty: 1 },
-        { type: 'put', action: 'buy', strike: atm, qty: 1 }
-      ];
-    }
-  },
-  {
-    id: 'strangle',
-    name: 'Long Strangle',
-    desc: 'Buy OTM Call & OTM Put. Cheaper than straddle, needs larger move.',
-    color: 'text-blue-400',
-    bg: 'bg-blue-500/10',
-    border: 'border-blue-500/20',
-    buildLegs: (spot, step) => {
-      const atm = Math.round(spot / step) * step;
-      return [
-        { type: 'call', action: 'buy', strike: atm + step, qty: 1 },
-        { type: 'put', action: 'buy', strike: atm - step, qty: 1 }
-      ];
-    }
-  },
-  {
-    id: 'bull-call',
-    name: 'Bull Call Spread',
-    desc: 'Buy ATM Call, Sell OTM Call. Limited risk/reward bullish trade.',
-    color: 'text-green-400',
-    bg: 'bg-green-500/10',
-    border: 'border-green-500/20',
-    buildLegs: (spot, step) => {
-      const atm = Math.round(spot / step) * step;
-      return [
-        { type: 'call', action: 'buy', strike: atm, qty: 1 },
-        { type: 'call', action: 'sell', strike: atm + step, qty: 1 }
-      ];
-    }
-  },
-  {
-    id: 'bear-put',
-    name: 'Bear Put Spread',
-    desc: 'Buy ATM Put, Sell OTM Put. Limited risk/reward bearish trade.',
-    color: 'text-red-400',
-    bg: 'bg-red-500/10',
-    border: 'border-red-500/20',
-    buildLegs: (spot, step) => {
-      const atm = Math.round(spot / step) * step;
-      return [
-        { type: 'put', action: 'buy', strike: atm, qty: 1 },
-        { type: 'put', action: 'sell', strike: atm - step, qty: 1 }
-      ];
-    }
-  },
-  {
-    id: 'iron-condor',
-    name: 'Iron Condor',
-    desc: 'Sell OTM Put & Call, Buy further OTM Put & Call. Market neutral.',
-    color: 'text-yellow-400',
-    bg: 'bg-yellow-500/10',
-    border: 'border-yellow-500/20',
-    buildLegs: (spot, step) => {
-      const atm = Math.round(spot / step) * step;
-      return [
-        { type: 'put', action: 'sell', strike: atm - step, qty: 1 },
-        { type: 'put', action: 'buy', strike: atm - (step * 2), qty: 1 },
-        { type: 'call', action: 'sell', strike: atm + step, qty: 1 },
-        { type: 'call', action: 'buy', strike: atm + (step * 2), qty: 1 }
-      ];
-    }
+const getColors = (sentiment) => {
+  switch (sentiment) {
+    case 'bullish': return { color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' };
+    case 'bearish': return { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20' };
+    case 'volatility': return { color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' };
+    case 'income': return { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' };
+    case 'neutral': 
+    default: return { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' };
   }
-];
+};
 
 export default function StrategyTemplates({ onApply, spotPrice, symbol }) {
-  const handleApply = (template) => {
+  const handleApply = (strat) => {
     // Determine step size based on symbol or spot price heuristics
     let stepSize = 50;
     if (symbol === 'BANKNIFTY') stepSize = 100;
@@ -90,7 +22,21 @@ export default function StrategyTemplates({ onApply, spotPrice, symbol }) {
     else if (spotPrice > 50000) stepSize = 100;
     else if (spotPrice < 5000) stepSize = 10;
     
-    const newLegs = template.buildLegs(spotPrice || 24500, stepSize);
+    const atm = Math.round((spotPrice || 24500) / stepSize) * stepSize;
+    
+    const newLegs = strat.legs.map(leg => {
+      // Scale the strikeOffset (which is relative to 50 in definitions) to the actual step size
+      const stepsAway = leg.type !== 'underlying' ? (leg.strikeOffset || 0) / (strat.strikeSeparation || 50) : 0;
+      const strike = atm + (stepsAway * stepSize);
+      
+      return {
+        type: leg.type === 'underlying' ? 'future' : leg.type,
+        action: leg.action,
+        strike: leg.type === 'underlying' ? 0 : strike,
+        qty: leg.qty || 1
+      };
+    });
+    
     onApply(newLegs);
   };
 
@@ -101,21 +47,24 @@ export default function StrategyTemplates({ onApply, spotPrice, symbol }) {
         <h2 className="text-lg font-semibold text-[#e6edf3]">Pre-made Strategies</h2>
       </div>
       <div className="flex overflow-x-auto pb-4 gap-4 snap-x snap-mandatory" style={{ scrollbarWidth: 'thin', scrollbarColor: '#30363d transparent' }}>
-        {TEMPLATES.map(tpl => (
-          <div 
-            key={tpl.id}
-            onClick={() => handleApply(tpl)}
-            className={`min-w-[260px] max-w-[280px] snap-start flex-shrink-0 border ${tpl.border} bg-[#0d1117] hover:${tpl.bg} transition-colors rounded-lg p-4 cursor-pointer group`}
-          >
-            <div className="flex justify-between items-start mb-2">
-              <h3 className={`font-bold text-sm ${tpl.color}`}>{tpl.name}</h3>
-              <ChevronRight size={14} className="text-[#8b949e] group-hover:text-white transition-colors" />
+        {STRATEGIES.map(strat => {
+          const style = getColors(strat.sentiment);
+          return (
+            <div 
+              key={strat.id}
+              onClick={() => handleApply(strat)}
+              className={`min-w-[260px] max-w-[280px] snap-start flex-shrink-0 border ${style.border} bg-[#0d1117] hover:${style.bg} transition-colors rounded-lg p-4 cursor-pointer group`}
+            >
+              <div className="flex justify-between items-start mb-2">
+                <h3 className={`font-bold text-sm ${style.color}`}>{strat.name}</h3>
+                <ChevronRight size={14} className="text-[#8b949e] group-hover:text-white transition-colors" />
+              </div>
+              <p className="text-xs text-[#8b949e] leading-relaxed">
+                {strat.description}
+              </p>
             </div>
-            <p className="text-xs text-[#8b949e] leading-relaxed">
-              {tpl.desc}
-            </p>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

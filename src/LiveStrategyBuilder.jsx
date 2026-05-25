@@ -145,10 +145,10 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
                 return newLegs.map((l, idx) => ({
                   ...l,
                   id: `tpl-${Date.now()}-${idx}`,
-                  qty: 1,
+                  qty: l.qty || 1,
                   lotSize: getLotSize(live.data?.symbol, live.data?.lotSize),
-                  T: calculateDTE(targetExpiry || live.data?.expiryDates?.[0]) / 365,
-                  expiry: targetExpiry || live.data?.expiryDates?.[0],
+                  T: calculateDTE(l.type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : (targetExpiry || live.data?.expiryDates?.[0])) / 365,
+                  expiry: l.type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : (targetExpiry || live.data?.expiryDates?.[0]),
                   premium: 0
                 }));
               });
