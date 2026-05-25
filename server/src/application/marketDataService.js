@@ -269,6 +269,7 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
   }
 
   const finalResponse = {
+    symbol: symbol,
     spot: spotPrice,
     lotSize: getLotSize(symbol),
     futurePrice: futurePrice,
