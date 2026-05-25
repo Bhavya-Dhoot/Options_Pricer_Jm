@@ -141,7 +141,7 @@ export function useAvailableExpiries(symbol = 'NIFTY') {
   
   useEffect(() => {
     let mounted = true;
-    fetch(`${API_BASE}/expiries?symbol=${symbol}`)
+    fetch(`${API_BASE}/expiries?symbol=${symbol}`, { cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
         if (mounted) {
