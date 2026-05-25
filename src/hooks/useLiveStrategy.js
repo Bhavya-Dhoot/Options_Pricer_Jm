@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { estimateMargin } from '../utils/marginCalculator.js';
 import { useAvailableExpiries } from '../useLiveData.js';
 
@@ -68,11 +68,50 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
     }
   }, [injectedLegs]);
 
-  // Reset strategy completely if the underlying symbol changes to prevent strike/expiry mismatch
+  const prevSymbolData = useRef({ symbol: '', spot: 0 });
+
+  // Transpose strategy completely if the underlying symbol changes to prevent strike/expiry mismatch
   useEffect(() => {
-    setLegs(prev => prev.filter(l => l.isComparative)); 
-    setTargetExpiry('');
-    setTargetFutExpiry('');
+    if (!live.data?.symbol) return;
+    
+    if (prevSymbolData.current.symbol && prevSymbolData.current.symbol !== live.data.symbol) {
+      const oldSpot = prevSymbolData.current.spot;
+      const newSpot = live.data.spot;
+      
+      const getStep = (sym, spot) => {
+        if (sym === 'BANKNIFTY' || sym === 'SENSEX' || spot > 50000) return 100;
+        if (spot < 5000) return 10;
+        return 50;
+      };
+      
+      const oldStep = getStep(prevSymbolData.current.symbol, oldSpot);
+      const newStep = getStep(live.data.symbol, newSpot);
+      
+      const oldAtm = Math.round(oldSpot / oldStep) * oldStep;
+      const newAtm = Math.round(newSpot / newStep) * newStep;
+      
+      const newLotSize = getLotSize(live.data.symbol, live.data.lotSize);
+      
+      setLegs(prev => prev.map(leg => {
+        if (leg.isComparative) return leg; // Leave injected legs alone (or they get filtered by UI)
+        
+        const newLeg = { ...leg, lotSize: newLotSize };
+        
+        if (leg.type === 'future') {
+           newLeg.premium = newSpot; // Approximate reset
+        } else {
+           const offsetSteps = Math.round((leg.strike - oldAtm) / oldStep);
+           newLeg.strike = newAtm + (offsetSteps * newStep);
+           newLeg.premium = 0; // Reset premium to wait for next tick
+        }
+        return newLeg;
+      }));
+      
+      setTargetExpiry('');
+      setTargetFutExpiry('');
+    }
+    
+    prevSymbolData.current = { symbol: live.data.symbol, spot: live.data.spot };
   }, [live.data?.symbol]);
 
   // Fetch backtest timestamps when toggled on
