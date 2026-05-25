@@ -22,9 +22,10 @@ Instead of simply summing the naked margins for complex positions, the backend f
 - **Strict Expiry Enforcement:** Rejects false calendar hedge offsets by strictly parsing `longLeg.expiry >= shortLeg.expiry`.
 
 ### 🧱 Atomic Concurrency Data Layer & Exact Ledger Math
-For the Paper Trading portfolio, the backend completely abandons standard `document.save()` ORM patterns which suffer from race conditions. Instead, it leverages MongoDB atomic `$inc` operators (`findOneAndUpdate({ $inc: ... })`) to process real-time PnL modifications and capital updates. This guarantees zero race-conditions or mathematical drift when hundreds of trades are closed concurrently.
-- **Exact Ledger Deductions:** The execution engine has been upgraded to immediately deduct exact premium cashflows (`Entry Price × Lot Size × Qty`) directly from the `virtualCapital` balance at the exact millisecond of purchase.
-- **Strict Symbol Isolation:** The batch trade parser enforces aggressive cross-validation across all legs, guaranteeing zero "Symbol Contamination" (e.g. attempting to bypass logic by sneaking a RELIANCE future into a NIFTY options batch).
+For the Paper Trading portfolio, the backend completely abandons standard `document.save()` ORM patterns which suffer from race conditions. Instead, we use raw MongoDB `$inc` operators embedded inside isolated ACID transactions. At the exact millisecond an options trade is executed, the virtual capital is atomically debited or credited exactly matched to the `(Entry Price * Quantity * Lot Size)` math, completely eliminating double-spend bugs or margin exhaustion bypasses.
+
+### 🛡️ Strict Symbol Isolation & UI State Safety
+The live strategy builder handles dynamic symbol switching flawlessly. If a user has an active NIFTY options strategy built out in the Leg Configurator and then switches the active symbol to SIEMENS, the UI forcibly clears all unexecuted legacy legs. This strict state separation prevents users from accidentally executing NIFTY strike prices or NIFTY expiries under a SIEMENS portfolio ticket.
 
 ### 🚨 Real-time Margin Exhaustion UI & Dynamic Capital Injection
 The frontend features a reactive boundary monitor that mathematically tracks SPAN Margin utilization against the live `virtualCapital` ledger.
