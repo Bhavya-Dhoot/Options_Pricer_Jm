@@ -10,6 +10,10 @@ export const registerUser = async (req, res) => {
   try {
     const { username, password } = req.body;
     
+    if (!password || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+    
     const userExists = await User.findOne({ username });
     if (userExists) {
       return res.status(400).json({ error: 'User already exists' });
@@ -95,6 +99,33 @@ export const updateCapital = async (req, res) => {
     if (user) {
       user.virtualCapital = Number(virtualCapital);
       user.realizedPnL = 0;
+      await user.save();
+      
+      res.json({
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        virtualCapital: user.virtualCapital,
+        realizedPnL: user.realizedPnL
+      });
+    } else {
+      res.status(404).json({ error: 'User not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const addCapital = async (req, res) => {
+  try {
+    const { amount } = req.body;
+    if (amount === undefined || isNaN(amount) || amount <= 0 || amount > 1000000000) {
+      return res.status(400).json({ error: 'Invalid capital amount. Must be between 1 and 100Cr.' });
+    }
+    
+    const user = await User.findById(req.user._id);
+    if (user) {
+      user.virtualCapital = user.virtualCapital + Number(amount);
       await user.save();
       
       res.json({

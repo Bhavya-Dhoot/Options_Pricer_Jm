@@ -52,7 +52,8 @@ app.use(helmet({
 
 // Security Optimization: Strict CORS
 // In production, origins should be whitelisted. For this simulation, we lock down to local/frontend.
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'], credentials: true }));
+const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'];
+app.use(cors({ origin: corsOrigins, credentials: true }));
 
 // Security Optimization: Payload limits & NoSQL Injection protection
 app.use(express.json({ limit: '10kb' }));
@@ -79,8 +80,23 @@ const globalLimiter = rateLimit({
   message: { error: 'Too many requests from this IP, please try again after a minute' }
 });
 
+const tradeLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 10, // Limit each IP to 10 trade requests per minute
+  message: { error: 'Too many trades from this IP, please try again after a minute' }
+});
+
 // Apply Rate Limiters
 app.use('/api/auth', authLimiter);
+
+// Specific limiters for trade endpoints
+app.use('/api/trades', (req, res, next) => {
+  if (req.method === 'POST') {
+    return tradeLimiter(req, res, next);
+  }
+  next();
+});
+
 app.use('/api', globalLimiter);
 
 // Network Optimization: Gzip compress all JSON payloads (reduces 50KB to 3KB)

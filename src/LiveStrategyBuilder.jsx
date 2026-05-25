@@ -29,6 +29,8 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
     estimatedMargin
   } = useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedLegs });
 
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 pb-24 space-y-6">
       
@@ -173,7 +175,7 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
                 <Save size={18} /> Save
               </button>
               <button 
-                onClick={handlePaperTrade}
+                onClick={() => setShowConfirmModal(true)}
                 className="flex-1 lg:flex-none px-4 py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
               >
                 <BarChart2 size={18} /> Execute
@@ -303,6 +305,33 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
         </div>
 
       </div>
+
+      {/* Modals */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-xl shadow-2xl max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="text-yellow-500" size={24} />
+              <h3 className="text-xl font-bold text-white">Confirm Market Order</h3>
+            </div>
+            <p className="text-[#8b949e] mb-6">Are you sure you want to execute {legs.length} leg(s) at Market Price?</p>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => setShowConfirmModal(false)}
+                className="flex-1 py-2 bg-[#0d1117] border border-[#30363d] hover:bg-[#21262d] text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => { setShowConfirmModal(false); handlePaperTrade(); }}
+                className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition-colors shadow-lg shadow-purple-500/20"
+              >
+                Confirm & Execute
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Save Modal */}
       {showSaveModal && (

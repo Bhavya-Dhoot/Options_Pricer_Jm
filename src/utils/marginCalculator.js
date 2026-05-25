@@ -114,8 +114,9 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
     let margin = 0;
     
     // Sort shorts from most ATM to OTM to pair logically
-    const sortedShorts = [...shorts].sort((a, b) => isCall ? a.strike - b.strike : b.strike - a.strike);
-    const availableLongs = [...longs].sort((a, b) => isCall ? a.strike - b.strike : b.strike - a.strike);
+    // Prioritizing the riskiest (closest to money) legs first
+    const sortedShorts = [...shorts].sort((a, b) => Math.abs(a.strike - spotPrice) - Math.abs(b.strike - spotPrice));
+    const availableLongs = [...longs].sort((a, b) => Math.abs(a.strike - spotPrice) - Math.abs(b.strike - spotPrice));
     
     sortedShorts.forEach(shortLeg => {
       let remainingShortQty = shortLeg.qty;
@@ -155,7 +156,18 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
       
       // Any unhedged remaining quantity is a naked short
       if (remainingShortQty > 0) {
-        const nakedMargin = spotPrice * lotSize * remainingShortQty * NAKED_SHORT_OPT_PERCENT;
+        // Calculate dynamic OTM distance
+        const otmAmount = isCall 
+          ? Math.max(0, shortLeg.strike - spotPrice) 
+          : Math.max(0, spotPrice - shortLeg.strike);
+        
+        // Scale margin down for deep OTM strikes (Floor at 5% Exposure Margin)
+        const marginPerUnit = Math.max(
+          spotPrice * 0.05, 
+          spotPrice * NAKED_SHORT_OPT_PERCENT - otmAmount
+        );
+        
+        const nakedMargin = marginPerUnit * lotSize * remainingShortQty;
         margin += nakedMargin;
       }
     });

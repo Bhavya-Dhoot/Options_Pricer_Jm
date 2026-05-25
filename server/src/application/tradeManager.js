@@ -26,6 +26,10 @@ const parseExpiry = (expiryStr) => {
 export const placeTrade = async (req, res) => {
   const { symbol, type, strike, expiry, action, orderType, limitPrice, qty, expectedPrice, slippageTolerance } = req.body;
   
+  if (!symbol || !/^[A-Z0-9&-]{1,20}$/.test(symbol)) {
+    return res.status(400).json({ error: 'Invalid symbol format.' });
+  }
+  
   if (!qty || !Number.isInteger(qty) || qty <= 0 || qty > 5000) {
     return res.status(400).json({ error: 'Quantity must be a positive integer and cannot exceed 5000 lots per order.' });
   }
@@ -101,15 +105,10 @@ export const placeTrade = async (req, res) => {
       verifiedEntryPrice = Number(limitPrice);
     }
 
-    // Calculate exact margin required for this trade
-    let estimatedMargin = 0;
-    if (action === 'buy') {
-      estimatedMargin = verifiedEntryPrice * qty * verifiedLotSize;
-    } else {
-      const liveData = await getLatestPrice(symbol);
-      const spot = liveData?.data?.spot || verifiedEntryPrice;
-      estimatedMargin = spot * verifiedLotSize * 0.15 * qty; // Fix: 15% of underlying contract value
-    }
+    const liveDataForMargin = await getLatestPrice(symbol);
+    const spotForStandaloneMargin = liveDataForMargin?.data?.spot || verifiedEntryPrice;
+    const standaloneMarginEst = estimateMargin([{ type, action, qty, lotSize: verifiedLotSize, strike, expiry, premium: verifiedEntryPrice }], spotForStandaloneMargin, symbol);
+    const estimatedMargin = standaloneMarginEst.totalMarginRequired;
 
     if (estimatedMargin > Number.MAX_SAFE_INTEGER || (verifiedEntryPrice * qty * verifiedLotSize) > Number.MAX_SAFE_INTEGER) {
       await session.abortTransaction();
@@ -148,6 +147,8 @@ export const placeTrade = async (req, res) => {
     let cashflow = 0;
     if (type !== 'future') {
        cashflow = (action === 'buy' ? -1 : 1) * verifiedEntryPrice * qty * verifiedLotSize;
+    } else {
+       cashflow = -estimatedMargin; // Deduct margin for futures entry
     }
 
     const postTradeCapital = user.virtualCapital + cashflow;
@@ -209,6 +210,10 @@ export const placeBatchTrades = async (req, res) => {
     const user = await User.findById(req.user._id).session(session);
     const verifiedLegs = [];
     const baseSymbol = symbol || legs[0].symbol || 'NIFTY'; 
+    if (!baseSymbol || !/^[A-Z0-9&-]{1,20}$/.test(baseSymbol)) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Invalid symbol format.' });
+    }
     registerSymbol(baseSymbol);
     
     let liveData = await getLatestPrice(baseSymbol);
@@ -281,11 +286,14 @@ export const placeBatchTrades = async (req, res) => {
          return res.status(400).json({ error: 'Calculated order value exceeds system arithmetic limits.' });
       }
       
+      const standaloneMarginEst = estimateMargin([{ type: leg.type, action: leg.action, qty: leg.qty, lotSize: verifiedLotSize, strike: leg.strike, expiry: leg.expiry, premium: verifiedEntryPrice }], spot, leg.symbol || baseSymbol);
+      
       verifiedLegs.push({
         ...leg,
         lotSize: verifiedLotSize,
         premium: verifiedEntryPrice,
-        entryPrice: verifiedEntryPrice
+        entryPrice: verifiedEntryPrice,
+        marginBlocked: standaloneMarginEst.totalMarginRequired
       });
     }
 
@@ -321,6 +329,8 @@ export const placeBatchTrades = async (req, res) => {
     verifiedLegs.forEach(leg => {
       if (leg.type !== 'future') {
          totalCashflow += (leg.action === 'buy' ? -1 : 1) * leg.entryPrice * leg.qty * leg.lotSize;
+      } else {
+         totalCashflow -= leg.marginBlocked;
       }
     });
 
@@ -348,7 +358,7 @@ export const placeBatchTrades = async (req, res) => {
         orderType: 'market',
         qty: leg.qty,
         lotSize: leg.lotSize,
-        marginBlocked: leg.action === 'buy' ? (leg.entryPrice * leg.qty * leg.lotSize) : 0, 
+        marginBlocked: leg.marginBlocked, 
         entryPrice: leg.entryPrice,
         entryTime: Date.now(),
         status: 'OPEN'
@@ -481,14 +491,14 @@ export const exitTrade = async (req, res) => {
     if (trade.type !== 'future') {
       exitCashflow = (trade.action === 'buy' ? 1 : -1) * verifiedExitPrice * parsedExitQty * lotSize;
     } else {
-      exitCashflow = pnl;
+      exitCashflow = pnl + (trade.marginBlocked || 0);
     }
 
     // --- MARGIN EXPLOIT PROTECTION (Simulated Exit Portfolio Validation) ---
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).session(session);
     if (!user) { await session.abortTransaction(); return res.status(404).json({ error: 'User not found' }); }
 
-    const openTrades = await Trade.find({ user: user._id, status: 'OPEN', symbol: trade.symbol });
+    const openTrades = await Trade.find({ user: user._id, status: 'OPEN', symbol: trade.symbol }).session(session);
     const remainingTrades = openTrades.filter(t => t._id.toString() !== trade._id.toString());
     
     if (remainingTrades.length > 0) {

@@ -35,7 +35,8 @@ export function getLotSize(sym, liveDataLotSize) {
   if (sym === 'MIDCPNIFTY') return 75;
   if (sym === 'SENSEX') return 10;
   if (sym === 'BANKEX') return 15;
-  return 25; // Default NIFTY
+  if (sym === 'NIFTY') return 25;
+  return 1; // Default for equities
 }
 
 export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedLegs }) {
@@ -238,7 +239,14 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
   }, [live.data, targetExpiry]);
 
   const addLeg = (type = 'call') => {
-    const defaultStrike = live.data?.spot ? Math.round(live.data.spot / 50) * 50 : 24500;
+    let step = 50;
+    const sym = live.data?.symbol || 'NIFTY';
+    if (sym === 'BANKNIFTY' || sym === 'SENSEX' || sym === 'BANKEX') step = 100;
+    else if (sym === 'FINNIFTY') step = 50;
+    else if (sym === 'MIDCPNIFTY') step = 25;
+    else if (sym !== 'NIFTY') step = 10; // Default for equities
+
+    const defaultStrike = live.data?.spot ? Math.round(live.data.spot / step) * step : 24500;
     const exp = targetExpiry || live.data?.expiryDates?.[0];
     let initialPremium = 0;
     if (type === 'future') {
@@ -310,12 +318,12 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
       const formattedLegs = legsToExecute.map(leg => ({
         symbol: live.data?.symbol || 'NIFTY', type: leg.type, strike: leg.strike,
         expiry: leg.type === 'future' ? (leg.expiry || targetFutExpiry || futExpiries?.[0]) : (leg.expiry || targetExpiry || live.data?.expiryDates?.[0]),
-        action: leg.action, orderType: 'market', qty: leg.qty, lotSize: leg.lotSize || 25, entryPrice: leg.premium
+        action: leg.action, orderType: 'market', qty: leg.qty, lotSize: leg.lotSize || getLotSize(live.data?.symbol, live.data?.lotSize), entryPrice: leg.premium
       }));
 
       const res = await fetch('/api/trades/batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ legs: formattedLegs })
+        body: JSON.stringify({ symbol: live.data?.symbol || 'NIFTY', legs: formattedLegs })
       });
 
       if (!res.ok) {

@@ -104,9 +104,23 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
       });
       if (res.ok) {
         fetchProfileAndTrades();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to exit trade');
       }
     } catch (err) {
       console.error(err);
+      alert('Network error while closing trade');
+    }
+  };
+
+  const handleCloseAll = async () => {
+    if (!window.confirm("Are you sure you want to close ALL open positions at Market Price?")) return;
+    
+    // Close each position sequentially (or could be Promise.all)
+    for (const trade of openTrades) {
+      const liveLTP = getLivePriceForTrade(trade);
+      await handleExitTrade(trade._id, trade.qty, liveLTP);
     }
   };
 
@@ -126,6 +140,29 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
       if (res.ok) {
         setProfile(await res.json());
         setIsEditingCapital(false);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddCapital = async (amount) => {
+    if (!amount || isNaN(amount)) return;
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('/api/auth/add-capital', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ amount: Number(amount) })
+      });
+      if (res.ok) {
+        setProfile(await res.json());
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to add capital');
       }
     } catch (err) {
       console.error(err);
@@ -205,17 +242,27 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     return { ...trade, liveLTP, pnl, lotSize };
   });
 
-  const marginPortfolioLegs = openTrades.map(t => ({
-    type: t.type,
-    action: t.action,
-    qty: t.qty,
-    lotSize: t.lotSize,
-    strike: t.strike,
-    expiry: t.expiry,
-    premium: t.entryPrice
-  }));
-  const spotForMargin = openTrades.length > 0 ? (livePrices[openTrades[0].symbol]?.spot || live.data?.spot || openTrades[0].entryPrice) : 0;
-  const usedMargin = openTrades.length > 0 ? estimateMargin(marginPortfolioLegs, spotForMargin, openTrades[0].symbol).totalMarginRequired : 0;
+  let usedMargin = 0;
+  const tradesBySymbol = openTrades.reduce((acc, trade) => {
+    if (!acc[trade.symbol]) acc[trade.symbol] = [];
+    acc[trade.symbol].push(trade);
+    return acc;
+  }, {});
+
+  Object.entries(tradesBySymbol).forEach(([symbol, tradesForSymbol]) => {
+    const marginPortfolioLegs = tradesForSymbol.map(t => ({
+      type: t.type,
+      action: t.action,
+      qty: t.qty,
+      lotSize: t.lotSize,
+      strike: t.strike,
+      expiry: t.expiry,
+      premium: t.entryPrice
+    }));
+    const spotForMargin = livePrices[symbol]?.spot || live.data?.spot || tradesForSymbol[0].entryPrice;
+    usedMargin += estimateMargin(marginPortfolioLegs, spotForMargin, symbol).totalMarginRequired;
+  });
+
   const virtualCapital = profile?.virtualCapital || 0;
   const marginUtilizationPct = virtualCapital > 0 ? (usedMargin / virtualCapital) * 100 : 0;
 
@@ -249,7 +296,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
             </div>
           </div>
           <button 
-            onClick={() => handleUpdateCapital(virtualCapital + 100000)}
+            onClick={() => handleAddCapital(100000)}
             className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-lg transition-colors whitespace-nowrap shadow-lg shadow-red-500/20"
           >
             + Add ₹1,00,000
@@ -324,7 +371,17 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
         </div>
       </div>
 
-      <h3 className="text-lg font-semibold text-[#e6edf3] mb-4">Active Positions</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-[#e6edf3]">Active Positions</h3>
+        {augmentedOpenTrades.length > 0 && (
+          <button 
+            onClick={handleCloseAll}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg shadow-lg shadow-red-500/20 transition-colors"
+          >
+            Close All Positions
+          </button>
+        )}
+      </div>
       <div className="card overflow-hidden mb-8">
         <table className="w-full text-left text-sm">
           <thead className="bg-[#161b22] border-b border-[#30363d]">
