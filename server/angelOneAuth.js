@@ -88,7 +88,7 @@ const API_LIMITS = {
   '/rest/secure/angelbroking/order/v1/searchScrip': { s: 1, m: Infinity, h: Infinity },
   '/rest/secure/angelbroking/portfolio/v1/getHolding': { s: 1, m: Infinity, h: Infinity },
   '/rest/secure/angelbroking/portfolio/v1/getAllHolding': { s: 1, m: Infinity, h: Infinity },
-  '/rest/secure/angelbroking/market/v1/quote': { s: 10, m: 500, h: 5000 },
+  '/rest/secure/angelbroking/market/v1/quote': { s: 2, m: 180, h: 5000 },
   '/rest/secure/angelbroking/margin/v1/batch': { s: 10, m: 500, h: 5000 },
   '/rest/secure/angelbroking/gtt/v1/ruleDetails': { s: 10, m: 500, h: 5000 },
   '/rest/secure/angelbroking/gtt/v1/ruleList': { s: 10, m: 500, h: 5000 },
@@ -102,15 +102,15 @@ let isProcessingQueue = false;
 const endpointTimestamps = new Map(); // Stores timestamps per endpoint
 
 const getRequiredDelay = (endpoint) => {
-  // Normalize dynamic endpoints like details/{GuiOrderID} if needed, but for now exact match is fine
-  // Fallback limit for unknown endpoints
-  const limits = API_LIMITS[endpoint] || { s: 1, m: 60, h: 1000 };
+  // Normalize dynamic endpoints like details/{GuiOrderID} and strip trailing slashes
+  const cleanEndpoint = endpoint.replace(/\/$/, '');
+  const limits = API_LIMITS[cleanEndpoint] || { s: 1, m: 60, h: 1000 };
   
-  if (!endpointTimestamps.has(endpoint)) {
-    endpointTimestamps.set(endpoint, []);
+  if (!endpointTimestamps.has(cleanEndpoint)) {
+    endpointTimestamps.set(cleanEndpoint, []);
   }
   
-  let timestamps = endpointTimestamps.get(endpoint);
+  let timestamps = endpointTimestamps.get(cleanEndpoint);
   const now = Date.now();
   
   // Prune timestamps older than 1 hour (3600000 ms)
@@ -161,7 +161,8 @@ const processQueue = async () => {
     }
     
     const { endpoint, requestFn, resolve, reject } = requestQueue[queueHeadIndex++];
-    endpointTimestamps.get(endpoint).push(Date.now());
+    const cleanEndpoint = endpoint.replace(/\/$/, '');
+    endpointTimestamps.get(cleanEndpoint).push(Date.now());
     
     // Smoothly space out requests to prevent socket flooding or triggering micro-burst limits
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -174,7 +175,8 @@ const processQueue = async () => {
         if (error.response?.status === 429 || error.response?.data?.errorCode === 'AB4030') {
           console.warn(`[AngelOne] Rate limit / AB4030 hit on ${endpoint}. Throttle kicking in.`);
           // Artificially inject a penalty timestamp to slow down the queue
-          endpointTimestamps.get(endpoint).push(Date.now() + 5000); 
+          const cleanEndpoint = endpoint.replace(/\/$/, '');
+          endpointTimestamps.get(cleanEndpoint).push(Date.now() + 5000); 
         }
         reject(error);
       });
