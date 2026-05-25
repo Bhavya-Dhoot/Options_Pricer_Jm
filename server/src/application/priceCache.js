@@ -28,29 +28,30 @@ export const getLatestPrice = async (symbol) => {
   return priceCache[symbol.toUpperCase()] || null;
 };
 
-const getMockData = (sym) => {
+const getMockData = (sym, targetExpiry) => {
   const baseSpot = sym === 'NIFTY' ? 24500 : (sym === 'BANKNIFTY' ? 51000 : 3800);
+  const expiry = targetExpiry || '25-JUN-2026';
   return {
     symbol: sym,
     spot: baseSpot,
     byExpiry: {
-        '25-JUN-2026': [
+        [expiry]: [
             { strikePrice: baseSpot, strike: baseSpot, call: { askPrice: 100, bidPrice: 95, ltp: 98 }, put: { askPrice: 100, bidPrice: 95, ltp: 98 } }
         ]
     },
-    futurePrices: { '25-JUN-2026': baseSpot + 50 }
+    futurePrices: { [expiry]: baseSpot + 50 }
   };
 };
 
-export const forceFetchLatestPrice = async (symbol) => {
+export const forceFetchLatestPrice = async (symbol, targetExpiry = null) => {
   const sym = symbol.toUpperCase();
   let data;
   try {
-    data = await fetchMarketDataChain(sym, null, null);
+    data = await fetchMarketDataChain(sym, targetExpiry, null);
   } catch (e) {
     if (e.message.includes('403') || e.message.includes('Access denied')) {
       console.warn(`[PriceCache] Using mock data for ${sym} (Rate Limited)`);
-      data = getMockData(sym);
+      data = getMockData(sym, targetExpiry);
     } else {
       throw e;
     }

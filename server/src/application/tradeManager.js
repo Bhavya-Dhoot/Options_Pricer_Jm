@@ -79,8 +79,14 @@ export const placeTrade = async (req, res) => {
       } else if (type === 'underlying') {
         verifiedEntryPrice = liveData.data.spot;
       } else {
-        const chain = liveData.data.byExpiry?.[expiry];
-        if (!chain) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid expiry for options.' }); }
+        let chain = liveData.data.byExpiry?.[expiry];
+        if (!chain) {
+          try {
+            const fresh = await forceFetchLatestPrice(baseSymbol, expiry);
+            chain = fresh.data.byExpiry?.[expiry];
+          } catch (e) {}
+        }
+        if (!chain) { await session.abortTransaction(); return res.status(400).json({ error: `Market data for expiry ${expiry} is currently unavailable. Please try again.` }); }
         
         const strikeData = chain.find(s => (s.strikePrice || s.strike) === strike);
         if (!strikeData) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid strike price.' }); }
@@ -262,8 +268,14 @@ export const placeBatchTrades = async (req, res) => {
       } else if (leg.type === 'underlying') {
         verifiedEntryPrice = liveData.data.spot;
       } else {
-        const chain = liveData.data.byExpiry?.[leg.expiry];
-        if (!chain) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid expiry.' }); }
+        let chain = liveData.data.byExpiry?.[leg.expiry];
+        if (!chain) {
+          try {
+            const fresh = await forceFetchLatestPrice(baseSymbol, leg.expiry);
+            chain = fresh.data.byExpiry?.[leg.expiry];
+          } catch (e) {}
+        }
+        if (!chain) { await session.abortTransaction(); return res.status(400).json({ error: `Market data for expiry ${leg.expiry} is currently unavailable. Please try again.` }); }
         const strikeData = chain.find(s => (s.strikePrice || s.strike) === leg.strike);
         if (!strikeData) { await session.abortTransaction(); return res.status(400).json({ error: 'Invalid strike.' }); }
         const optData = leg.type === 'call' ? strikeData.call : strikeData.put;
