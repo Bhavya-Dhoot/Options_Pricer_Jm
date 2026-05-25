@@ -437,6 +437,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
             ))}
           </tbody>
         </table>
+      </div>
       <div className="flex items-center justify-between mb-4 mt-12">
         <h3 className="text-lg font-semibold text-[#e6edf3]">P&L Ledger (Completed Trades)</h3>
       </div>
