@@ -9,7 +9,7 @@ import {
   ensureScripMasterInitialized
 } from '../../scripMaster.js';
 import { solveImpliedIV } from '../../../src/bsm.js';
-import { redisClient, io } from '../../proxy.js';
+import { io } from '../../proxy.js';
 
 // Fallback Map Cache if Redis is unavailable
 export const chainCache = new Map();
@@ -27,11 +27,21 @@ export function formatExpiry(angelExp) {
   return `${day}-${formattedMonth}-${year}`;
 }
 
+const flightPromises = new Map();
+
 export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
   await ensureScripMasterInitialized();
   symbol = symbol?.toUpperCase() || 'NIFTY';
   
-  const spotToken = getUnderlyingToken(symbol);
+  const cacheKey = `${symbol}_${targetExpiry || 'DEFAULT'}_${futureExpiry || 'DEFAULT'}`;
+  
+  if (flightPromises.has(cacheKey)) {
+    return flightPromises.get(cacheKey);
+  }
+  
+  const fetchPromise = (async () => {
+    try {
+      const spotToken = getUnderlyingToken(symbol);
   if (!spotToken) throw new Error(`Underlying token not found for ${symbol}`);
 
   const spotExchange = (symbol === 'SENSEX' || symbol === 'BANKEX') ? 'BSE' : 'NSE';
@@ -270,13 +280,17 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
     }
   };
 
-  if (redisClient.isOpen) {
-    await redisClient.setEx(`chain:${symbol}`, 15, JSON.stringify(finalResponse));
-  }
   chainCache.set(symbol, { data: finalResponse, timestamp: Date.now() });
 
   // Broadcast tick diffs (1KB) instead of 100KB polling payload
   io.emit('market_tick', { symbol, spot: spotPrice, timestamp: finalResponse.timestamp });
   
   return finalResponse;
+    } finally {
+      flightPromises.delete(cacheKey);
+    }
+  })();
+  
+  flightPromises.set(cacheKey, fetchPromise);
+  return fetchPromise;
 }

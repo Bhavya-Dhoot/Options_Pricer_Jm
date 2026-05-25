@@ -7,7 +7,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { createClient } from 'redis';
 import mongoSanitize from 'express-mongo-sanitize';
 import { getAngelSession, smartApiRequest } from './angelOneAuth.js';
 import { 
@@ -44,19 +43,7 @@ export const io = new SocketIOServer(server, {
 server.keepAliveTimeout = 65000; // 65 seconds
 server.headersTimeout = 66000;   // slightly higher than keepAlive
 
-// Redis Configuration
-export const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
-
-let redisErrorLogged = false;
-redisClient.on('error', (err) => {
-  if (!redisErrorLogged) {
-    console.warn('[Redis] Connection Error - Defaulting to in-memory fallback map.');
-    redisErrorLogged = true;
-  }
-});
-redisClient.connect().then(() => console.log('[Redis] Connected')).catch(() => {
-  // Catch handles the initial promise rejection silently to prevent unhandled rejection crashes
-});
+// Redis functionality removed for Render compatibility
 
 // Security Optimization: HTTP Headers
 app.use(helmet({
@@ -136,16 +123,9 @@ app.get('/api/option-chain', async (req, res) => {
   console.log(`[/api/option-chain] Request for ${symbol}`);
 
   if (!force) {
-    if (redisClient.isOpen) {
-      const cachedStr = await redisClient.get(`chain:${symbol}`);
-      if (cachedStr) {
-        return res.json(JSON.parse(cachedStr));
-      }
-    } else {
-      const cached = chainCache.get(symbol);
-      if (cached && (Date.now() - cached.timestamp < 15000)) {
-        return res.json(cached.data);
-      }
+    const cached = chainCache.get(symbol);
+    if (cached && (Date.now() - cached.timestamp < 15000)) {
+      return res.json(cached.data);
     }
   }
 
