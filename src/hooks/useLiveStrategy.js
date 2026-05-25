@@ -68,6 +68,13 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
     }
   }, [injectedLegs]);
 
+  // Reset strategy completely if the underlying symbol changes to prevent strike/expiry mismatch
+  useEffect(() => {
+    setLegs(prev => prev.filter(l => l.isComparative)); 
+    setTargetExpiry('');
+    setTargetFutExpiry('');
+  }, [live.data?.symbol]);
+
   // Fetch backtest timestamps when toggled on
   useEffect(() => {
     if (isBacktestMode) {

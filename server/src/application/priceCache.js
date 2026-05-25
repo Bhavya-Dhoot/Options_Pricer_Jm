@@ -28,16 +28,19 @@ export const getLatestPrice = async (symbol) => {
   return priceCache[symbol.toUpperCase()] || null;
 };
 
-const getMockData = (sym) => ({
-  symbol: sym,
-  spot: 24500,
-  byExpiry: {
-      '25-JUN-2026': [
-          { strikePrice: 24500, strike: 24500, call: { askPrice: 100, bidPrice: 95, ltp: 98 }, put: { askPrice: 100, bidPrice: 95, ltp: 98 } }
-      ]
-  },
-  futurePrices: { '25-JUN-2026': 24550 }
-});
+const getMockData = (sym) => {
+  const baseSpot = sym === 'NIFTY' ? 24500 : (sym === 'BANKNIFTY' ? 51000 : 3800);
+  return {
+    symbol: sym,
+    spot: baseSpot,
+    byExpiry: {
+        '25-JUN-2026': [
+            { strikePrice: baseSpot, strike: baseSpot, call: { askPrice: 100, bidPrice: 95, ltp: 98 }, put: { askPrice: 100, bidPrice: 95, ltp: 98 } }
+        ]
+    },
+    futurePrices: { '25-JUN-2026': baseSpot + 50 }
+  };
+};
 
 export const forceFetchLatestPrice = async (symbol) => {
   const sym = symbol.toUpperCase();
