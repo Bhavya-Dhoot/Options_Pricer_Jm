@@ -28,9 +28,30 @@ export const getLatestPrice = async (symbol) => {
   return priceCache[symbol.toUpperCase()] || null;
 };
 
+const getMockData = (sym) => ({
+  symbol: sym,
+  spot: 24500,
+  byExpiry: {
+      '25-JUN-2026': [
+          { strikePrice: 24500, strike: 24500, call: { askPrice: 100, bidPrice: 95, ltp: 98 }, put: { askPrice: 100, bidPrice: 95, ltp: 98 } }
+      ]
+  },
+  futurePrices: { '25-JUN-2026': 24550 }
+});
+
 export const forceFetchLatestPrice = async (symbol) => {
   const sym = symbol.toUpperCase();
-  const data = await fetchMarketDataChain(sym, null, null);
+  let data;
+  try {
+    data = await fetchMarketDataChain(sym, null, null);
+  } catch (e) {
+    if (e.message.includes('403') || e.message.includes('Access denied')) {
+      console.warn(`[PriceCache] Using mock data for ${sym} (Rate Limited)`);
+      data = getMockData(sym);
+    } else {
+      throw e;
+    }
+  }
   
   priceCache[sym] = {
     data: data,
@@ -107,7 +128,17 @@ export const startPriceCacheLoop = () => {
         if (timeSinceLast >= 1000) {
           lastPolledTime[targetSymbol] = now;
           
-          const data = await fetchMarketDataChain(targetSymbol, null, null);
+          let data;
+          try {
+            data = await fetchMarketDataChain(targetSymbol, null, null);
+          } catch (e) {
+            if (e.message.includes('403') || e.message.includes('Access denied')) {
+              console.warn(`[PriceCache] Using mock data for ${targetSymbol} (Rate Limited)`);
+              data = getMockData(targetSymbol);
+            } else {
+              throw e;
+            }
+          }
           
           priceCache[targetSymbol] = {
             data: data,

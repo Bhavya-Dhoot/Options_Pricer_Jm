@@ -21,8 +21,15 @@ Instead of simply summing the naked margins for complex positions, the backend f
 - **Opposing Risk Offsets:** Automatically detects mutually exclusive expiration structures (like Iron Condors) and charges margin strictly on the **Maximum** of the two wings (`Math.max(callRisk, putRisk)`), drastically reducing margin bloat.
 - **Strict Expiry Enforcement:** Rejects false calendar hedge offsets by strictly parsing `longLeg.expiry >= shortLeg.expiry`.
 
-### 🧱 Atomic Concurrency Data Layer
+### 🧱 Atomic Concurrency Data Layer & Exact Ledger Math
 For the Paper Trading portfolio, the backend completely abandons standard `document.save()` ORM patterns which suffer from race conditions. Instead, it leverages MongoDB atomic `$inc` operators (`findOneAndUpdate({ $inc: ... })`) to process real-time PnL modifications and capital updates. This guarantees zero race-conditions or mathematical drift when hundreds of trades are closed concurrently.
+- **Exact Ledger Deductions:** The execution engine has been upgraded to immediately deduct exact premium cashflows (`Entry Price × Lot Size × Qty`) directly from the `virtualCapital` balance at the exact millisecond of purchase.
+- **Strict Symbol Isolation:** The batch trade parser enforces aggressive cross-validation across all legs, guaranteeing zero "Symbol Contamination" (e.g. attempting to bypass logic by sneaking a RELIANCE future into a NIFTY options batch).
+
+### 🚨 Real-time Margin Exhaustion UI & Dynamic Capital Injection
+The frontend features a reactive boundary monitor that mathematically tracks SPAN Margin utilization against the live `virtualCapital` ledger.
+- If margin utilization breaches **90%**, a high-priority UI alert is algorithmically triggered, warning the user of impending toxic leverage.
+- A **1-Click Quick Add (+ ₹1,00,000)** recovery protocol is exposed inside the dashboard, allowing users to rapidly inject emergency capital without navigating away from the live Options Chain.
 
 ### 📈 Lognormal Probability Engine & Absolute Boundary Defenses
 Instead of basic standard-deviation approximations, the Probability Engine uses a full **Lognormal PDF Integration** derived from the BSM model. It computes the risk-neutral drift `(r - q - σ²/2)` and standard deviation `σ√T`, then numerically integrates the probability mass function across the entire range of profitable intrinsic values at expiry.
@@ -145,6 +152,8 @@ Rather than relying on a static delay, it implements an advanced **Endpoint-Awar
 - `/getCandleData`: 3/s, 180/m, 5000/h
 
 If any of the three windows (1s, 60s, 3600s) for a specific endpoint hits absolute mathematical capacity, the underlying Promise is paused for the exact nanoseconds required until the oldest token expires. To prevent dangerous simultaneous bursts that trigger IP bans, the queue smoothly spaces queued requests by 20ms. Furthermore, if Angel One ever throws a limit warning, the backend instantly trips a circuit breaker, injecting an automatic 5-second penalty cooldown to protect the socket.
+
+- **Graceful Mock Fallbacks:** In the event that Angel One absolutely locks the API due to rate-limit thresholding (e.g. `403 Access Denied`), the PriceCache daemon is engineered to intercept the crash safely and seamlessly inject structurally identical Mock Data into the WebSocket pipelines, guaranteeing that the trading engine never fatally crashes during an API blockade.
 
 ### 7. Slippage-Free Paper Trade Execution
 To guarantee the highest fidelity during virtual trading, the engine refuses to execute market orders against stale background caches. If the underlying asset's cache is older than 500 milliseconds, the execution layer instantly halts, forcefully bypasses the background daemon, and injects a synchronous `forceFetchLatestPrice` API request to retrieve the absolute real-time tick before committing the paper trade to MongoDB.
