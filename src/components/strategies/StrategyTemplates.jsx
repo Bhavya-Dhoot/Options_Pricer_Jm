@@ -100,12 +100,12 @@ export default function StrategyTemplates({ onApply, spotPrice, symbol }) {
         <LayoutTemplate size={18} className="text-[#58a6ff]" />
         <h2 className="text-lg font-semibold text-[#e6edf3]">Pre-made Strategies</h2>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+      <div className="flex overflow-x-auto pb-4 gap-4 snap-x snap-mandatory" style={{ scrollbarWidth: 'thin', scrollbarColor: '#30363d transparent' }}>
         {TEMPLATES.map(tpl => (
           <div 
             key={tpl.id}
             onClick={() => handleApply(tpl)}
-            className={`border ${tpl.border} bg-[#0d1117] hover:${tpl.bg} transition-colors rounded-lg p-4 cursor-pointer group`}
+            className={`min-w-[260px] max-w-[280px] snap-start flex-shrink-0 border ${tpl.border} bg-[#0d1117] hover:${tpl.bg} transition-colors rounded-lg p-4 cursor-pointer group`}
           >
             <div className="flex justify-between items-start mb-2">
               <h3 className={`font-bold text-sm ${tpl.color}`}>{tpl.name}</h3>

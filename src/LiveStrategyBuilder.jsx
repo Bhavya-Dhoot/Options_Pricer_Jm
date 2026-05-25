@@ -110,26 +110,6 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
         </div>
       </div>
 
-      {/* Pre-made Strategies (Templates) */}
-      {isPaperTradeMode && (
-        <StrategyTemplates 
-          spotPrice={live.data?.spot} 
-          symbol={live.data?.symbol}
-          onApply={(newLegs) => {
-            setLegs(prev => {
-              return newLegs.map((l, idx) => ({
-                ...l,
-                id: `tpl-${Date.now()}-${idx}`,
-                qty: 1,
-                lotSize: getLotSize(live.data?.symbol, live.data?.lotSize),
-                T: calculateDTE(targetExpiry || live.data?.expiryDates?.[0]) / 365,
-                expiry: targetExpiry || live.data?.expiryDates?.[0],
-                premium: 0
-              }));
-            });
-          }} 
-        />
-      )}
 
       {/* Full Width Layout */}
       <div className="space-y-6">
@@ -154,6 +134,27 @@ export default function LiveStrategyBuilder({ live, riskFreeRate = 6.5, isPaperT
             }}
           />
         </div>
+
+        {/* Pre-made Strategies (Templates) */}
+        {isPaperTradeMode && (
+          <StrategyTemplates 
+            spotPrice={live.data?.spot} 
+            symbol={live.data?.symbol}
+            onApply={(newLegs) => {
+              setLegs(prev => {
+                return newLegs.map((l, idx) => ({
+                  ...l,
+                  id: `tpl-${Date.now()}-${idx}`,
+                  qty: 1,
+                  lotSize: getLotSize(live.data?.symbol, live.data?.lotSize),
+                  T: calculateDTE(targetExpiry || live.data?.expiryDates?.[0]) / 365,
+                  expiry: targetExpiry || live.data?.expiryDates?.[0],
+                  premium: 0
+                }));
+              });
+            }} 
+          />
+        )}
 
         {/* Action Buttons & Metrics Bar */}
         <div className="flex flex-col lg:flex-row gap-4 items-center">
