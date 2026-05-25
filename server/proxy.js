@@ -46,8 +46,17 @@ server.headersTimeout = 66000;   // slightly higher than keepAlive
 
 // Redis Configuration
 export const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
-redisClient.on('error', (err) => console.log('[Redis] Client Error', err));
-redisClient.connect().then(() => console.log('[Redis] Connected')).catch(() => console.log('[Redis] Connection Failed'));
+
+let redisErrorLogged = false;
+redisClient.on('error', (err) => {
+  if (!redisErrorLogged) {
+    console.warn('[Redis] Connection Error - Defaulting to in-memory fallback map.');
+    redisErrorLogged = true;
+  }
+});
+redisClient.connect().then(() => console.log('[Redis] Connected')).catch(() => {
+  // Catch handles the initial promise rejection silently to prevent unhandled rejection crashes
+});
 
 // Security Optimization: HTTP Headers
 app.use(helmet({
