@@ -87,14 +87,17 @@ export const forceFetchLatestPrice = async (symbol, targetExpiry = null, futureE
   
   // CRITICAL: Merge byExpiry and futurePrices into existing cache to support
   // multi-expiry positions. Without this, fetching expiry B wipes expiry A's data.
+  // We MUST shallow clone `data` to prevent mutating the shared object returned by flightPromises.
   const existing = priceCache[sym];
+  const mergedData = { ...data };
+  
   if (existing && existing.data) {
-    data.byExpiry = { ...existing.data.byExpiry, ...data.byExpiry };
-    data.futurePrices = { ...existing.data.futurePrices, ...data.futurePrices };
+    mergedData.byExpiry = { ...existing.data.byExpiry, ...mergedData.byExpiry };
+    mergedData.futurePrices = { ...existing.data.futurePrices, ...mergedData.futurePrices };
   }
   
   priceCache[sym] = {
-    data: data,
+    data: mergedData,
     timestamp: Date.now()
   };
   lastPolledTime[sym] = Date.now();
