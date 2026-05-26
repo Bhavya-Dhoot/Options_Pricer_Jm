@@ -71,11 +71,11 @@ const getMockData = (sym, targetExpiry) => {
   };
 };
 
-export const forceFetchLatestPrice = async (symbol, targetExpiry = null) => {
+export const forceFetchLatestPrice = async (symbol, targetExpiry = null, futureExpiry = null) => {
   const sym = symbol.toUpperCase();
   let data;
   try {
-    data = await fetchMarketDataChain(sym, targetExpiry, null);
+    data = await fetchMarketDataChain(sym, targetExpiry, futureExpiry);
   } catch (e) {
     if (e.message.includes('403') || e.message.includes('Access denied')) {
       console.warn(`[PriceCache] Using mock data for ${sym} (Rate Limited)`);

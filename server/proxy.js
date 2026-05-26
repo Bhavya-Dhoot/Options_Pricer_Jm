@@ -128,7 +128,8 @@ getAngelSession().then(() => {
   console.error("Angel One initial auth failed:", err.message);
 });
 
-import { fetchMarketDataChain, formatExpiry, chainCache } from './src/application/marketDataService.js';
+import { formatExpiry } from './src/application/marketDataService.js';
+import { getLatestPrice, forceFetchLatestPrice } from './src/application/priceCache.js';
 
 app.get('/api/option-chain', async (req, res) => {
   const symbol = req.query.symbol?.toUpperCase() || 'NIFTY';
@@ -138,16 +139,19 @@ app.get('/api/option-chain', async (req, res) => {
 
   console.log(`[/api/option-chain] Request for ${symbol}`);
 
-  if (!force) {
-    const cached = chainCache.get(symbol);
-    if (cached && (Date.now() - cached.timestamp < 15000)) {
-      return res.json(cached.data);
-    }
-  }
-
   try {
-    const finalResponse = await fetchMarketDataChain(symbol, targetExpiry, futureExpiry);
-    res.json(finalResponse);
+    if (!force) {
+      const cached = await getLatestPrice(symbol);
+      if (cached && (Date.now() - cached.timestamp < 15000)) {
+        // Only return from cache if it has the requested expiry data already merged in
+        if (!targetExpiry || cached.data.byExpiry?.[targetExpiry]) {
+          return res.json(cached.data);
+        }
+      }
+    }
+
+    const fresh = await forceFetchLatestPrice(symbol, targetExpiry, futureExpiry);
+    res.json(fresh.data);
   } catch (error) {
     console.error(`[/api/option-chain] Error for ${symbol}:`, error.message);
     res.status(error.message.includes('not found') ? 404 : 500).json({ error: error.message });
