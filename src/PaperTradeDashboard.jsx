@@ -391,7 +391,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
               <th className="p-4 text-[#8b949e] font-semibold text-right">Qty</th>
               <th className="p-4 text-[#8b949e] font-semibold text-right">Avg Entry</th>
               <th className="p-4 text-[#8b949e] font-semibold text-right">LTP</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">P&L</th>
+              <th className="p-4 text-[#8b949e] font-semibold text-right">Unrealised MTM</th>
               <th className="p-4 text-[#8b949e] font-semibold text-right">Manage</th>
             </tr>
           </thead>
@@ -416,7 +416,10 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
                 <td className="p-4 text-right font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</td>
                 <td className="p-4 text-right font-mono text-[#58a6ff]">₹{trade.liveLTP?.toFixed(2)}</td>
                 <td className={`p-4 text-right font-mono font-bold ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(2)}
+                  <div>{trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(2)}</div>
+                  <div className="text-[10px] font-normal text-[#8b949e]">
+                    {((trade.action === 'buy' ? 1 : -1) * (trade.liveLTP - trade.entryPrice)).toFixed(2)} per unit
+                  </div>
                 </td>
                 <td className="p-4 text-right flex items-center justify-end gap-2">
                   <button 

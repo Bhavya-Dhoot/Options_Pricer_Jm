@@ -57,6 +57,14 @@ export const forceFetchLatestPrice = async (symbol, targetExpiry = null) => {
     }
   }
   
+  // CRITICAL: Merge byExpiry and futurePrices into existing cache to support
+  // multi-expiry positions. Without this, fetching expiry B wipes expiry A's data.
+  const existing = priceCache[sym];
+  if (existing && existing.data) {
+    data.byExpiry = { ...existing.data.byExpiry, ...data.byExpiry };
+    data.futurePrices = { ...existing.data.futurePrices, ...data.futurePrices };
+  }
+  
   priceCache[sym] = {
     data: data,
     timestamp: Date.now()
@@ -142,6 +150,13 @@ export const startPriceCacheLoop = () => {
             } else {
               throw e;
             }
+          }
+          
+          // Merge byExpiry and futurePrices to preserve multi-expiry data
+          const existingBg = priceCache[targetSymbol];
+          if (existingBg && existingBg.data) {
+            data.byExpiry = { ...existingBg.data.byExpiry, ...data.byExpiry };
+            data.futurePrices = { ...existingBg.data.futurePrices, ...data.futurePrices };
           }
           
           priceCache[targetSymbol] = {
