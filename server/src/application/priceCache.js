@@ -2,6 +2,8 @@ import { smartApiRequest } from '../../angelOneAuth.js';
 import { getFutureToken, getOptionTokens, getUnderlyingToken } from '../../scripMaster.js';
 import { MarketSnapshot } from '../domain/MarketSnapshot.js';
 import { fetchMarketDataChain, chainCache } from './marketDataService.js';
+import { checkTPSL } from './tpslEngine.js';
+import Trade from '../domain/Trade.js';
 
 // Global cache
 // { "NIFTY": { spot: 24500, iv: 0.15, optionChain: [...], futures: {...}, timestamp: 123456 } }
@@ -12,6 +14,32 @@ const lastSnapshotTime = {};
 const lastRequestTime = {}; // For garbage collection
 const lastPolledTime = {}; // To prevent spamming the same symbol 3 times a second
 let isFetching = false;
+
+// Multi-Expiry Support: Track which expiries are actively held for each symbol
+// { NIFTY: ['26-May-2026', '26-Jun-2026'], BANKNIFTY: ['29-May-2026'] }
+const activeExpiries = {};
+const expiryRotationIndex = {}; // Round-robin index per symbol
+let lastExpiryRefreshTime = 0;
+
+// Refresh active expiries from open trades every 30 seconds
+async function refreshActiveExpiries() {
+  const now = Date.now();
+  if (now - lastExpiryRefreshTime < 30000) return;
+  lastExpiryRefreshTime = now;
+  try {
+    const openTrades = await Trade.find({ status: 'OPEN' }).select('symbol expiry').lean();
+    // Reset
+    for (const key of Object.keys(activeExpiries)) delete activeExpiries[key];
+    for (const t of openTrades) {
+      if (!t.expiry) continue;
+      const sym = t.symbol.toUpperCase();
+      if (!activeExpiries[sym]) activeExpiries[sym] = new Set();
+      activeExpiries[sym].add(t.expiry);
+    }
+  } catch (e) {
+    // Non-critical, will retry next cycle
+  }
+}
 
 // Register symbols that users have in their portfolios
 export const registerSymbol = (symbol, isPriority = false) => {
@@ -140,9 +168,20 @@ export const startPriceCacheLoop = () => {
         if (timeSinceLast >= 1000) {
           lastPolledTime[targetSymbol] = now;
           
+          // Determine which expiry to fetch: rotate through active trade expiries
+          await refreshActiveExpiries();
+          let targetExpiry = null;
+          const symExpiries = activeExpiries[targetSymbol];
+          if (symExpiries && symExpiries.size > 1) {
+            const expArr = Array.from(symExpiries);
+            if (!expiryRotationIndex[targetSymbol]) expiryRotationIndex[targetSymbol] = 0;
+            expiryRotationIndex[targetSymbol] = (expiryRotationIndex[targetSymbol] + 1) % expArr.length;
+            targetExpiry = expArr[expiryRotationIndex[targetSymbol]];
+          }
+          
           let data;
           try {
-            data = await fetchMarketDataChain(targetSymbol, null, null);
+            data = await fetchMarketDataChain(targetSymbol, targetExpiry, null);
           } catch (e) {
             if (e.message.includes('403') || e.message.includes('Access denied')) {
               console.warn(`[PriceCache] Using mock data for ${targetSymbol} (Rate Limited)`);
@@ -175,6 +214,9 @@ export const startPriceCacheLoop = () => {
               data: data
             }).catch(e => console.error(`[PriceCache] Snapshot Failed:`, e.message));
           }
+          
+          // TP/SL Engine: Check if any open trades need auto-exit
+          checkTPSL(priceCache).catch(e => console.error(`[PriceCache] TPSL Check Error:`, e.message));
         } else {
           // Request was skipped because it's too fresh! NO quota consumed.
           // Don't punish the background loop with a 900ms delay if we didn't hit the API.

@@ -22,6 +22,8 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
             <th className="pb-2 font-medium w-48">Expiry & Strike</th>
             <th className="pb-2 font-medium w-20">Lots</th>
             <th className="pb-2 font-medium w-24">Entry Price</th>
+            <th className="pb-2 font-medium w-16">TP</th>
+            <th className="pb-2 font-medium w-16">SL</th>
             <th className="pb-2 font-medium w-24">Breakeven</th>
             <th className="pb-2 font-medium w-8"></th>
           </tr>
@@ -153,6 +155,28 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                 </div>
               </td>
               <td className="py-2.5">
+                <input 
+                  type="number" 
+                  step="0.05"
+                  value={leg.targetPrice || ''} 
+                  disabled={leg.isComparative}
+                  onChange={e => onUpdateLeg(leg.id, { targetPrice: e.target.value ? Number(e.target.value) : null })}
+                  className="w-16 bg-[#0d1117] border border-[#30363d] rounded px-1.5 py-1 text-green-400 font-mono text-xs focus:border-green-500 focus:outline-none disabled:opacity-50"
+                  placeholder="Opt."
+                />
+              </td>
+              <td className="py-2.5">
+                <input 
+                  type="number" 
+                  step="0.05"
+                  value={leg.stopLoss || ''} 
+                  disabled={leg.isComparative}
+                  onChange={e => onUpdateLeg(leg.id, { stopLoss: e.target.value ? Number(e.target.value) : null })}
+                  className="w-16 bg-[#0d1117] border border-[#30363d] rounded px-1.5 py-1 text-red-400 font-mono text-xs focus:border-red-500 focus:outline-none disabled:opacity-50"
+                  placeholder="Opt."
+                />
+              </td>
+              <td className="py-2.5">
                 <span className="text-[#58a6ff] font-mono font-semibold">
                   {leg.type === 'call' 
                     ? (leg.strike + leg.premium).toFixed(2) 
@@ -175,7 +199,7 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
           ))}
           {legs.length === 0 && (
             <tr>
-              <td colSpan="6" className="py-4 text-center text-xs text-[#8b949e]">
+              <td colSpan="9" className="py-4 text-center text-xs text-[#8b949e]">
                 No positions added. Click "Add Leg" to build a strategy.
               </td>
             </tr>

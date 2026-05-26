@@ -22,6 +22,12 @@ const tradeSchema = new mongoose.Schema({
   exitTime: { type: Date },
   
   realizedPnL: { type: Number, default: 0 },
+  
+  // Optional TP/SL
+  targetPrice: { type: Number, default: null },
+  stopLoss: { type: Number, default: null },
+  exitReason: { type: String, enum: ['MANUAL', 'TARGET_HIT', 'STOPLOSS_HIT', null], default: null },
+  
   createdAt: { type: Date, default: Date.now }
 });
 

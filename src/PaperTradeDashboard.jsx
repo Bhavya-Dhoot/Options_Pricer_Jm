@@ -403,6 +403,20 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
                 <td className="p-4">
                   <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
                   <div className="text-xs text-[#8b949e]">{trade.expiry || 'SPOT'} {trade.type.toUpperCase()} {trade.strike ? trade.strike : ''}</div>
+                  {(trade.targetPrice || trade.stopLoss) && (
+                    <div className="flex gap-1.5 mt-1">
+                      {trade.targetPrice && (
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/20">
+                          TP ₹{trade.targetPrice}
+                        </span>
+                      )}
+                      {trade.stopLoss && (
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20">
+                          SL ₹{trade.stopLoss}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td className="p-4">
                   <span className={`px-2 py-1 rounded text-xs font-bold ${trade.action === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -486,7 +500,16 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
                   <div className="text-[10px] text-gray-500">{new Date(trade.exitTime).toLocaleString()}</div>
                 </td>
                 <td className={`p-4 text-right font-mono font-bold ${trade.realizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {trade.realizedPnL >= 0 ? '+' : ''}₹{trade.realizedPnL?.toFixed(2) || '0.00'}
+                  <div>{trade.realizedPnL >= 0 ? '+' : ''}₹{trade.realizedPnL?.toFixed(2) || '0.00'}</div>
+                  {trade.exitReason && (
+                    <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded mt-1 inline-block ${
+                      trade.exitReason === 'TARGET_HIT' ? 'bg-green-500/15 text-green-400 border border-green-500/20' :
+                      trade.exitReason === 'STOPLOSS_HIT' ? 'bg-red-500/15 text-red-400 border border-red-500/20' :
+                      'bg-gray-500/15 text-gray-400 border border-gray-500/20'
+                    }`}>
+                      {trade.exitReason === 'TARGET_HIT' ? '🎯 Target' : trade.exitReason === 'STOPLOSS_HIT' ? '🛑 Stop Loss' : 'Manual'}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}

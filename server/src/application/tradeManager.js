@@ -24,7 +24,7 @@ const parseExpiry = (expiryStr) => {
 };
 
 export const placeTrade = async (req, res) => {
-  const { symbol, type, strike, expiry, action, orderType, limitPrice, qty, expectedPrice, slippageTolerance } = req.body;
+  const { symbol, type, strike, expiry, action, orderType, limitPrice, qty, expectedPrice, slippageTolerance, targetPrice, stopLoss } = req.body;
   
   if (!symbol || !/^[A-Z0-9&-]{1,20}$/.test(symbol)) {
     return res.status(400).json({ error: 'Invalid symbol format.' });
@@ -82,7 +82,7 @@ export const placeTrade = async (req, res) => {
         let chain = liveData.data.byExpiry?.[expiry];
         if (!chain) {
           try {
-            const fresh = await forceFetchLatestPrice(baseSymbol, expiry);
+            const fresh = await forceFetchLatestPrice(symbol, expiry);
             chain = fresh.data.byExpiry?.[expiry];
           } catch (e) {}
         }
@@ -171,6 +171,19 @@ export const placeTrade = async (req, res) => {
     );
 
     // Create the trade within the active session
+    // Validate TP/SL if provided
+    const finalEntryPrice = orderType === 'market' ? verifiedEntryPrice : Number(limitPrice);
+    if (targetPrice != null) {
+      if (typeof targetPrice !== 'number' || targetPrice <= 0) { await session.abortTransaction(); return res.status(400).json({ error: 'Target price must be a positive number.' }); }
+      if (action === 'buy' && targetPrice <= finalEntryPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'For Buy positions, target price must be above entry price.' }); }
+      if (action === 'sell' && targetPrice >= finalEntryPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'For Sell positions, target price must be below entry price.' }); }
+    }
+    if (stopLoss != null) {
+      if (typeof stopLoss !== 'number' || stopLoss <= 0) { await session.abortTransaction(); return res.status(400).json({ error: 'Stop loss must be a positive number.' }); }
+      if (action === 'buy' && stopLoss >= finalEntryPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'For Buy positions, stop loss must be below entry price.' }); }
+      if (action === 'sell' && stopLoss <= finalEntryPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'For Sell positions, stop loss must be above entry price.' }); }
+    }
+
     const trade = await Trade.create([{
       user: req.user._id,
       symbol,
@@ -185,7 +198,9 @@ export const placeTrade = async (req, res) => {
       marginBlocked: estimatedMargin,
       entryPrice: orderType === 'market' ? verifiedEntryPrice : null,
       entryTime: orderType === 'market' ? Date.now() : null,
-      status: orderType === 'market' ? 'OPEN' : 'PENDING'
+      status: orderType === 'market' ? 'OPEN' : 'PENDING',
+      targetPrice: targetPrice || null,
+      stopLoss: stopLoss || null
     }], { session, ordered: true });
 
     await session.commitTransaction();
@@ -373,7 +388,9 @@ export const placeBatchTrades = async (req, res) => {
         marginBlocked: leg.marginBlocked, 
         entryPrice: leg.entryPrice,
         entryTime: Date.now(),
-        status: 'OPEN'
+        status: 'OPEN',
+        targetPrice: leg.targetPrice || null,
+        stopLoss: leg.stopLoss || null
     }));
     
     const newTrades = await Trade.create(tradeDocs, { session, ordered: true });
@@ -547,7 +564,7 @@ export const exitTrade = async (req, res) => {
     // Atomically close trade
     const updatedTrade = await Trade.findOneAndUpdate(
       { _id: tradeId, status: 'OPEN' },
-      { status: 'CLOSED', exitPrice: verifiedExitPrice, exitTime: Date.now(), $inc: { realizedPnL: pnl } },
+      { status: 'CLOSED', exitPrice: verifiedExitPrice, exitTime: Date.now(), exitReason: 'MANUAL', $inc: { realizedPnL: pnl } },
       { new: true, session }
     );
 

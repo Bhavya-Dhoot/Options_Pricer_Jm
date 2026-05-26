@@ -318,7 +318,9 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
       const formattedLegs = legsToExecute.map(leg => ({
         symbol: live.data?.symbol || 'NIFTY', type: leg.type, strike: leg.strike,
         expiry: leg.type === 'future' ? (leg.expiry || targetFutExpiry || futExpiries?.[0]) : (leg.expiry || targetExpiry || live.data?.expiryDates?.[0]),
-        action: leg.action, orderType: 'market', qty: leg.qty, lotSize: leg.lotSize || getLotSize(live.data?.symbol, live.data?.lotSize), entryPrice: leg.premium
+        action: leg.action, orderType: 'market', qty: leg.qty, lotSize: leg.lotSize || getLotSize(live.data?.symbol, live.data?.lotSize), entryPrice: leg.premium,
+        targetPrice: leg.targetPrice || null,
+        stopLoss: leg.stopLoss || null
       }));
 
       const res = await fetch('/api/trades/batch', {
