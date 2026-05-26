@@ -394,9 +394,9 @@ export async function solveImpliedIV(S, K, T, r, marketPrice, optionType, q = 0,
 
   let sigma = initialGuess; // Warm-Start optimization
   for (let i = 0; i < 5; i++) {
-    // Thread Yielding (DoS Prevention): Let the Node Event Loop breathe
+    // Thread Yielding (DoS Prevention): Let the Event Loop breathe
     if (i % 10 === 0) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => typeof setImmediate !== 'undefined' ? setImmediate(resolve) : setTimeout(resolve, 0));
     }
     
     const bsm = calculateBSM(S, K, T, r, sigma, optionType, q);
