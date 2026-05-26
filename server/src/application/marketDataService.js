@@ -70,8 +70,8 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
   }
   
   const finalTargetExpiryFormatted = targetExpiry || formatExpiry(expiries[0]);
-  // Find the raw Angel expiry string that matches the formatted one
-  const finalTargetExpiryRaw = expiries.find(e => formatExpiry(e) === finalTargetExpiryFormatted) || expiries[0];
+  // Find the raw Angel expiry string that matches the formatted one (case-insensitive to support uppercase UI payloads)
+  const finalTargetExpiryRaw = expiries.find(e => formatExpiry(e).toLowerCase() === finalTargetExpiryFormatted.toLowerCase()) || expiries[0];
   
   // 3. Find Options Tokens around Spot
   const optionsForExpiry = getOptionTokens(symbol, finalTargetExpiryRaw);
