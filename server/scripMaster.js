@@ -24,6 +24,7 @@ const parseDate = (dStr) => {
 };
 
 let initPromise = null;
+let isInitializing = false;
 
 export function ensureScripMasterInitialized() {
   if (!initPromise) {
@@ -33,7 +34,8 @@ export function ensureScripMasterInitialized() {
 }
 
 export async function initScripMaster() {
-  if (scripMaster.length > 0) return;
+  if (isInitializing) return;
+  isInitializing = true;
   console.log('[ScripMaster] Downloading OpenAPIScripMaster.json... (this may take a moment)');
   try {
     const response = await axios.get(SCRIP_MASTER_URL);
@@ -111,6 +113,8 @@ export async function initScripMaster() {
   } catch (err) {
     console.error('[ScripMaster] Failed to download Scrip Master:', err.message);
     throw err;
+  } finally {
+    isInitializing = false;
   }
 }
 
