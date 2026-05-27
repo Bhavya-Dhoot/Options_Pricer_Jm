@@ -39,6 +39,10 @@ const agentProtect = async (req, res, next) => {
 router.get('/chain', agentProtect, async (req, res) => {
   try {
     const symbol = req.query.symbol?.toUpperCase() || 'NIFTY';
+    // SEC-3 Fix: Validate symbol format matching trade endpoint pattern
+    if (!/^[A-Z0-9&-]{1,20}$/.test(symbol)) {
+      return res.status(400).json({ error: 'Invalid symbol format.' });
+    }
     const chainData = await fetchMarketDataChain(symbol, req.query.expiry, req.query.futExpiry);
     
     // Compress payload for Agent LLM token limit

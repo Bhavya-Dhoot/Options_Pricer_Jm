@@ -4,7 +4,7 @@ const tradeSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   symbol: { type: String, required: true },
   type: { type: String, enum: ['call', 'put', 'future', 'underlying'], required: true },
-  strike: { type: Number, required: true },
+  strike: { type: Number, default: 0 }, // Not required: futures have no strike price
   expiry: { type: String }, // e.g., '27-JUN-2026'
   action: { type: String, enum: ['buy', 'sell'], required: true },
   orderType: { type: String, enum: ['market', 'limit'], required: true },
@@ -34,5 +34,7 @@ const tradeSchema = new mongoose.Schema({
 // DB Optimization: Compound index for blazing fast O(1) queries on open trades
 tradeSchema.index({ user: 1, status: 1 });
 tradeSchema.index({ user: 1, status: 1, symbol: 1 });
+// OPT-5: Compound index for TP/SL engine queries (status + targetPrice/stopLoss)
+tradeSchema.index({ status: 1, targetPrice: 1, stopLoss: 1 });
 
 export default mongoose.model('Trade', tradeSchema);

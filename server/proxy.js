@@ -34,9 +34,12 @@ const app = express();
 app.set('trust proxy', 1); // CRITICAL FOR PRODUCTION: Trust Load Balancer IPs for Rate Limiting
 const PORT = process.env.PORT || 3001;
 
+// Security Optimization: Strict CORS (hoisted for Socket.io + Express)
+const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'];
+
 const server = http.createServer(app);
 export const io = new SocketIOServer(server, {
-  cors: { origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'], credentials: true }
+  cors: { origin: corsOrigins, credentials: true }
 });
 
 // Load Balancer Fix: Keep-Alive Timeouts
@@ -52,7 +55,6 @@ app.use(helmet({
 
 // Security Optimization: Strict CORS
 // In production, origins should be whitelisted. For this simulation, we lock down to local/frontend.
-const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'];
 app.use(cors({ origin: corsOrigins, credentials: true }));
 
 // Security Optimization: Payload limits & NoSQL Injection protection
@@ -141,7 +143,7 @@ app.get('/api/option-chain', async (req, res) => {
 
   try {
     if (!force) {
-      const cached = await getLatestPrice(symbol);
+      const cached = getLatestPrice(symbol);
       if (cached && (Date.now() - cached.timestamp < 15000)) {
         // Only return from cache if it has the requested expiry data already merged in
         if (!targetExpiry || cached.data.byExpiry?.[targetExpiry]) {

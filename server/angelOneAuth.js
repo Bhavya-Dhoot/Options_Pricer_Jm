@@ -115,7 +115,7 @@ const getRequiredDelay = (endpoint) => {
   
   // Prune timestamps older than 1 hour (3600000 ms)
   timestamps = timestamps.filter(t => now - t <= 3600000);
-  endpointTimestamps.set(endpoint, timestamps);
+  endpointTimestamps.set(cleanEndpoint, timestamps);
 
   // Filter timestamps into the 3 windows
   const last1Sec = timestamps.filter(t => now - t <= 1000);
@@ -167,19 +167,20 @@ const processQueue = async () => {
     // Smoothly space out requests to prevent socket flooding or triggering micro-burst limits
     await new Promise(resolve => setTimeout(resolve, 20));
 
-    // Fire asynchronously to maximize throughput without waiting for network RTT
-    requestFn()
-      .then(result => resolve(result))
-      .catch(error => {
-        // Simple Circuit Breaker / Throttle Backoff log
-        if (error.response?.status === 429 || error.response?.data?.errorCode === 'AB4030') {
-          console.warn(`[AngelOne] Rate limit / AB4030 hit on ${endpoint}. Throttle kicking in.`);
-          // Artificially inject a penalty timestamp to slow down the queue
-          const cleanEndpoint = endpoint.replace(/\/$/, '');
-          endpointTimestamps.get(cleanEndpoint).push(Date.now() + 5000); 
-        }
-        reject(error);
-      });
+    // Serial Execution: Await each request to enforce per-second rate limits.
+    // Fire-and-forget was causing burst-fire when multiple requests queued simultaneously.
+    try {
+      const result = await requestFn();
+      resolve(result);
+    } catch (error) {
+      // Circuit Breaker / Throttle Backoff
+      if (error.response?.status === 429 || error.response?.data?.errorCode === 'AB4030') {
+        console.warn(`[AngelOne] Rate limit / AB4030 hit on ${endpoint}. Throttle kicking in.`);
+        // Artificially inject a penalty timestamp to slow down the queue
+        endpointTimestamps.get(cleanEndpoint).push(Date.now() + 5000); 
+      }
+      reject(error);
+    }
       
     // GC Queue
     if (queueHeadIndex > 1000) {
@@ -219,7 +220,9 @@ const executeAxiosRequest = async (endpoint, payload, jwtToken) => {
   return response.data;
 };
 
-let isRenewing = false;
+// Shared renewal promise — replaces dangerous busy-wait loop.
+// All concurrent callers await the same promise instead of spinning.
+let renewalInFlight = null;
 
 export async function smartApiRequest(endpoint, payload) {
   const sessionData = await getAngelSession();
@@ -233,17 +236,14 @@ export async function smartApiRequest(endpoint, payload) {
           return data;
         } catch (error) {
           if (error.isTokenExpired) {
-            if (!isRenewing) {
-              isRenewing = true;
+            // Shared Promise pattern: only one renewal in-flight at a time,
+            // all concurrent callers await the same promise (no busy-wait).
+            if (!renewalInFlight) {
               console.log('[Angel One] Token expired, acquiring global renewal lock...');
               clearSession();
-              await getAngelSession().finally(() => { isRenewing = false; });
-            } else {
-              // Wait for the primary thread to finish renewing
-              while (isRenewing) {
-                await new Promise(resolve => setTimeout(resolve, 50));
-              }
+              renewalInFlight = getAngelSession().finally(() => { renewalInFlight = null; });
             }
+            await renewalInFlight;
             const newSession = await getAngelSession();
             // Retry once immediately with the new token
             return await executeAxiosRequest(endpoint, payload, newSession.jwtToken);

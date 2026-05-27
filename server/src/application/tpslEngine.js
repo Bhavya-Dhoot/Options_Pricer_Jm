@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Trade from '../domain/Trade.js';
 import User from '../domain/User.js';
 import { estimateMargin } from '../domain/marginCalculator.js';
+import { setHasTPSLTrades } from './priceCache.js';
 
 /**
  * TP/SL Auto-Exit Engine
@@ -149,7 +150,11 @@ export async function checkTPSL(priceCache) {
       ]
     }).lean();
 
-    if (trades.length === 0) return;
+    if (trades.length === 0) {
+      setHasTPSLTrades(false);
+      return;
+    }
+    setHasTPSLTrades(true);
 
     for (const trade of trades) {
       const ltp = getLTPForTrade(trade, priceCache);

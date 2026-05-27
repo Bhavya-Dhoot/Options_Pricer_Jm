@@ -136,13 +136,16 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
 
   for (let i = 0; i < tokensToFetch.length; i += chunkSize) {
     const chunk = tokensToFetch.slice(i, i + chunkSize);
+    const exchangeTokens = { [optExchange]: chunk };
+    // BUG-6 Fix: Only attach spot token to the FIRST chunk to avoid wasting API quota.
+    // Previously spot was attached to every chunk, costing 2 extra credits per cycle.
+    if (i === 0) {
+      exchangeTokens[spotExchange] = [spotToken];
+    }
     fetchPromises.push(
       smartApiRequest('/rest/secure/angelbroking/market/v1/quote', {
         mode: 'FULL',
-        exchangeTokens: {
-          [spotExchange]: [spotToken], // Spot is attached to every chunk to guarantee synchronization
-          [optExchange]: chunk
-        }
+        exchangeTokens
       })
     );
   }
@@ -201,8 +204,14 @@ export async function fetchMarketDataChain(symbol, targetExpiry, futureExpiry) {
     
     // If order book is active but LTP is outside the spread, it's stale. Use mid-price.
     if (bid > 0 && ask > 0 && ask >= bid) {
+      // BUG-10 Fix: For illiquid options with very wide spreads (e.g., bid=0.05, ask=5.00),
+      // mid-price is wildly inaccurate. Only use mid-price if spread is reasonable (<50% of ask).
+      const spreadRatio = (ask - bid) / ask;
       if (ltp < bid || ltp > ask) {
-        ltp = (bid + ask) / 2;
+        if (spreadRatio < 0.5) {
+          ltp = (bid + ask) / 2;
+        }
+        // If spread is too wide, keep the original LTP as-is (it's more realistic than mid-price)
       }
     }
     return ltp;

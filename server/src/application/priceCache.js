@@ -14,6 +14,8 @@ const lastSnapshotTime = {};
 const lastRequestTime = {}; // For garbage collection
 const lastPolledTime = {}; // To prevent spamming the same symbol 3 times a second
 let isFetching = false;
+let hasTPSLTrades = true; // Default true so first DB check runs on startup; engine sets to false if none found
+export const setHasTPSLTrades = (val) => { hasTPSLTrades = val; };
 
 // Multi-Expiry Support: Track which expiries are actively held for each symbol
 // { NIFTY: ['26-May-2026', '26-Jun-2026'], BANKNIFTY: ['29-May-2026'] }
@@ -52,7 +54,7 @@ export const registerSymbol = (symbol, isPriority = false) => {
   }
 };
 
-export const getLatestPrice = async (symbol) => {
+export const getLatestPrice = (symbol) => {
   return priceCache[symbol.toUpperCase()] || null;
 };
 
@@ -194,15 +196,17 @@ export const startPriceCacheLoop = () => {
             }
           }
           
-          // Merge byExpiry and futurePrices to preserve multi-expiry data
+          // CRITICAL (BUG-4 fix): Clone data before merging to prevent mutating the
+          // shared object returned by flightPromises in-flight dedup.
           const existingBg = priceCache[targetSymbol];
+          const mergedData = { ...data };
           if (existingBg && existingBg.data) {
-            data.byExpiry = { ...existingBg.data.byExpiry, ...data.byExpiry };
-            data.futurePrices = { ...existingBg.data.futurePrices, ...data.futurePrices };
+            mergedData.byExpiry = { ...existingBg.data.byExpiry, ...mergedData.byExpiry };
+            mergedData.futurePrices = { ...existingBg.data.futurePrices, ...mergedData.futurePrices };
           }
           
           priceCache[targetSymbol] = {
-            data: data,
+            data: mergedData,
             timestamp: Date.now()
           };
           
@@ -218,8 +222,10 @@ export const startPriceCacheLoop = () => {
             }).catch(e => console.error(`[PriceCache] Snapshot Failed:`, e.message));
           }
           
-          // TP/SL Engine: Check if any open trades need auto-exit
-          checkTPSL(priceCache).catch(e => console.error(`[PriceCache] TPSL Check Error:`, e.message));
+          // TP/SL Engine: Only check if we know TP/SL trades exist (skip DB query otherwise)
+          if (hasTPSLTrades) {
+            checkTPSL(priceCache).catch(e => console.error(`[PriceCache] TPSL Check Error:`, e.message));
+          }
         } else {
           // Request was skipped because it's too fresh! NO quota consumed.
           // Don't punish the background loop with a 900ms delay if we didn't hit the API.

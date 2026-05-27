@@ -51,9 +51,10 @@ export const placeTrade = async (req, res) => {
     // Server-Side Price Verification
     registerSymbol(symbol); // Ensure symbol is tracked in background
     let verifiedEntryPrice = 0;
+    let liveData = null; // Hoisted for reuse in margin calculation (OPT-2)
     
     if (orderType === 'market') {
-      let liveData = await getLatestPrice(symbol);
+      liveData = getLatestPrice(symbol);
       
       // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
       if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
@@ -111,8 +112,9 @@ export const placeTrade = async (req, res) => {
       verifiedEntryPrice = Number(limitPrice);
     }
 
-    const liveDataForMargin = await getLatestPrice(symbol);
-    const spotForStandaloneMargin = liveDataForMargin?.data?.spot || verifiedEntryPrice;
+    // OPT-2 Fix: Reuse the already-fetched liveData for margin calculation
+    // instead of calling getLatestPrice again (previously called 3 times).
+    const spotForStandaloneMargin = liveData?.data?.spot || verifiedEntryPrice;
     const standaloneMarginEst = estimateMargin([{ type, action, qty, lotSize: verifiedLotSize, strike, expiry, premium: verifiedEntryPrice }], spotForStandaloneMargin, symbol);
     const estimatedMargin = standaloneMarginEst.totalMarginRequired;
 
@@ -144,8 +146,8 @@ export const placeTrade = async (req, res) => {
     const newLeg = { type, action, qty, lotSize: verifiedLotSize, strike, expiry, premium: verifiedEntryPrice };
     const combinedLegs = [...allPortfolioLegs, newLeg];
     
-    const liveDataForSpot = await getLatestPrice(symbol);
-    const spotForMargin = liveDataForSpot?.data?.spot || verifiedEntryPrice;
+    // OPT-2 Fix: Reuse liveData from price verification (no redundant 3rd call)
+    const spotForMargin = liveData?.data?.spot || verifiedEntryPrice;
     
     const newMarginEst = estimateMargin(combinedLegs, spotForMargin, symbol);
     const newTotalMargin = newMarginEst.totalMarginRequired;
@@ -237,7 +239,7 @@ export const placeBatchTrades = async (req, res) => {
     }
     registerSymbol(baseSymbol);
     
-    let liveData = await getLatestPrice(baseSymbol);
+    let liveData = getLatestPrice(baseSymbol);
     
     // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
     if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
@@ -428,7 +430,7 @@ export const getLivePrices = async (req, res) => {
     const prices = {};
     for (const sym of symbols) {
       registerSymbol(sym, isPriority); // Track symbol and its priority status
-      const cache = await getLatestPrice(sym);
+      const cache = getLatestPrice(sym);
       if (cache) {
         prices[sym] = cache.data;
       }
@@ -458,7 +460,7 @@ export const exitTrade = async (req, res) => {
 
     // Server-Side Verification of Exit Price
     let verifiedExitPrice = 0;
-    const liveData = await getLatestPrice(trade.symbol);
+    const liveData = getLatestPrice(trade.symbol);
     
     if (!liveData || !liveData.data) {
       await session.abortTransaction();
@@ -502,14 +504,10 @@ export const exitTrade = async (req, res) => {
 
     // Calculate PnL for this exit
     const direction = trade.action === 'buy' ? 1 : -1;
+    // OPT-6 Fix: Use scripMaster.getLotSize() consistently instead of inline hardcoding
     let lotSize = trade.lotSize;
     if (!lotSize) {
-      if (trade.symbol === 'BANKNIFTY') lotSize = 15;
-      else if (trade.symbol === 'FINNIFTY') lotSize = 40;
-      else if (trade.symbol === 'MIDCPNIFTY') lotSize = 75;
-      else if (trade.symbol === 'SENSEX') lotSize = 10;
-      else if (trade.symbol === 'BANKEX') lotSize = 15;
-      else lotSize = 25;
+      lotSize = getLotSize(trade.symbol);
     }
     const pnl = direction * (verifiedExitPrice - trade.entryPrice) * parsedExitQty * lotSize;
     
