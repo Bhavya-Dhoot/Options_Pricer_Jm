@@ -50,6 +50,12 @@ export async function initScripMaster() {
       } else if (s.exch_seg === 'NFO' || s.exch_seg === 'BFO') {
         const sym = s.name;
         
+        // Filter out BFO for everything except SENSEX/BANKEX
+        // Filter out NFO for SENSEX/BANKEX just in case
+        const isBSEIndex = (sym === 'SENSEX' || sym === 'BANKEX');
+        if (s.exch_seg === 'BFO' && !isBSEIndex) continue;
+        if (s.exch_seg === 'NFO' && isBSEIndex) continue;
+        
         if (!lotSizeCache[sym] && s.lotsize) {
           lotSizeCache[sym] = parseInt(s.lotsize, 10);
         }
