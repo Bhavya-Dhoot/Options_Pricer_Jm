@@ -39,6 +39,14 @@ export async function initScripMaster() {
     const response = await axios.get(SCRIP_MASTER_URL);
     scripMaster = response.data;
     
+    // Clear existing caches for fresh update
+    nseMaster.length = 0;
+    for (const key in optionsIndex) delete optionsIndex[key];
+    for (const key in futuresIndex) delete futuresIndex[key];
+    for (const key in expiriesCache) delete expiriesCache[key];
+    for (const key in futureExpiriesCache) delete futureExpiriesCache[key];
+    for (const key in lotSizeCache) delete lotSizeCache[key];
+    
     // Hash map building
     const expSet = {};
     const futExpSet = {};
@@ -154,3 +162,19 @@ export function getAvailableFutureExpiries(symbol) {
 export function getLotSize(symbol) {
   return lotSizeCache[symbol] || 1;
 }
+
+// Schedule updates at 9:00 AM (540 mins) and 12:30 PM (750 mins) IST
+let lastUpdateMinute = -1;
+setInterval(() => {
+  const now = new Date();
+  const istMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + 330;
+  const currentMinuteOfDay = ((istMinutes % 1440) + 1440) % 1440;
+  
+  if ((currentMinuteOfDay === 540 || currentMinuteOfDay === 750) && lastUpdateMinute !== currentMinuteOfDay) {
+    lastUpdateMinute = currentMinuteOfDay;
+    console.log(`[ScripMaster] Scheduled update triggered at IST minute ${currentMinuteOfDay}`);
+    initPromise = initScripMaster().catch(err => {
+      console.error('[ScripMaster] Scheduled update failed:', err.message);
+    });
+  }
+}, 30000); // Check every 30 seconds
