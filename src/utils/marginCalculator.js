@@ -38,6 +38,7 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
   // Naked margin percentages (approximate for indices)
   const NAKED_SHORT_OPT_PERCENT = 0.15; // 15% of contract value
   const FUTURE_MARGIN_PERCENT = 0.12;   // 12% of contract value
+  const EQUITY_SHORT_MARGIN_PERCENT = 0.20; // 20% for short selling equity (SEBI MIS norm)
   
   const parseExpiry = (expiryStr) => {
     if (!expiryStr) return 0;
@@ -63,9 +64,21 @@ export function estimateMargin(legs, spotPrice, symbol = 'NIFTY') {
   const longFutures = processedLegs.filter(l => l.type === 'future' && l.action === 'buy');
   const shortFutures = processedLegs.filter(l => l.type === 'future' && l.action === 'sell');
   const futures = processedLegs.filter(l => l.type === 'future');
+  const equityLegs = processedLegs.filter(l => l.type === 'underlying' || l.type === 'equity');
   
   // 1. Long Options (Premium is paid in cash, NOT held as Margin)
   // The net premium is already calculated and displayed separately in the UI.
+
+  // 1.5. Equity Margin
+  // Buy-side equity: No margin (full cash deducted at entry — handled by cashflow logic in tradeManager)
+  // Sell-side equity (short selling): 20% margin on notional value
+  equityLegs.forEach(leg => {
+    if (leg.action === 'sell') {
+      const eqLotSize = leg.lotSize || 1;
+      const equityMargin = (leg.premium || spotPrice) * eqLotSize * leg.qty * EQUITY_SHORT_MARGIN_PERCENT;
+      totalMargin += equityMargin;
+    }
+  });
 
   // 2. Futures Margin
   // Calculate directional margin for ALL futures first.

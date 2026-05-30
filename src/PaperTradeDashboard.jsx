@@ -170,16 +170,18 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
   };
 
   const handleInjectToBuilder = (trade) => {
-    // Generate a comparative leg
+    // Generate a comparative leg (map backend 'underlying' → frontend 'equity')
+    const frontendType = trade.type === 'underlying' ? 'equity' : trade.type;
+    const isEquity = trade.type === 'underlying';
     const leg = {
       id: `compare-${trade._id}`,
-      type: trade.type,
+      type: frontendType,
       action: trade.action,
       strike: trade.strike,
       qty: trade.qty,
       premium: trade.entryPrice,
-      lotSize: trade.lotSize,
-      T: trade.type === 'future' ? 0.05 : 0.05, // Default approx
+      lotSize: isEquity ? 1 : trade.lotSize,
+      T: isEquity ? 0 : 0.05, // Equity has no time dimension
       expiry: trade.expiry,
       isComparative: true // Special flag
     };
@@ -402,7 +404,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
               <tr key={trade._id} className="border-b border-[#30363d]/50 hover:bg-[#161b22]/50 transition-colors">
                 <td className="p-4">
                   <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
-                  <div className="text-xs text-[#8b949e]">{trade.expiry || 'SPOT'} {trade.type.toUpperCase()} {trade.strike ? trade.strike : ''}</div>
+                  <div className="text-xs text-[#8b949e]">{trade.type === 'underlying' ? 'EQUITY (CASH)' : `${trade.expiry || 'SPOT'} ${trade.type.toUpperCase()} ${trade.strike ? trade.strike : ''}`}</div>
                   {(trade.targetPrice || trade.stopLoss) && (
                     <div className="flex gap-1.5 mt-1">
                       {trade.targetPrice && (
@@ -425,7 +427,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
                 </td>
                 <td className="p-4 text-right">
                   <div className="font-mono text-[#e6edf3]">{trade.qty * trade.lotSize}</div>
-                  <div className="text-xs text-[#8b949e]">{trade.qty} Lots</div>
+                  <div className="text-xs text-[#8b949e]">{trade.type === 'underlying' ? `${trade.qty} Shares` : `${trade.qty} Lots`}</div>
                 </td>
                 <td className="p-4 text-right font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</td>
                 <td className="p-4 text-right font-mono text-[#58a6ff]">₹{trade.liveLTP?.toFixed(2)}</td>
@@ -478,7 +480,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
                 <td className="p-4">
                   <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
                   <div className="text-xs text-[#8b949e]">
-                    {trade.expiry || 'SPOT'} {trade.type.toUpperCase()} {trade.strike ? trade.strike : ''}
+                    {trade.type === 'underlying' ? 'EQUITY (CASH)' : `${trade.expiry || 'SPOT'} ${trade.type.toUpperCase()} ${trade.strike ? trade.strike : ''}`}
                   </div>
                   <div className="text-[10px] text-gray-500 mt-1" title="Unique Trade Hash for Audit">ID: {trade._id}</div>
                 </td>
@@ -489,7 +491,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
                 </td>
                 <td className="p-4 text-right">
                   <div className="font-mono text-[#e6edf3]">{trade.qty * (trade.lotSize || 1)}</div>
-                  <div className="text-xs text-[#8b949e]">{trade.qty} Lots</div>
+                  <div className="text-xs text-[#8b949e]">{trade.type === 'underlying' ? `${trade.qty} Shares` : `${trade.qty} Lots`}</div>
                 </td>
                 <td className="p-4 text-right">
                   <div className="font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</div>

@@ -185,7 +185,10 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
       let newPremium = leg.premium;
       let newT = leg.type === 'future' ? (globalInputs.farDte / 365) : (globalInputs.dte / 365);
       
-      if (leg.type === 'future') {
+      if (leg.type === 'equity') {
+        newPremium = live.data.spot || 0;
+        newT = 0;
+      } else if (leg.type === 'future') {
         const futExp = leg.expiry || targetFutExpiry || futExpiries?.[0];
         newPremium = live.data.futurePrices?.[futExp] || live.data.futurePrice || live.data.spot || 0;
       } else if (live.data.byExpiry && leg.expiry) {
@@ -249,7 +252,9 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
     const defaultStrike = live.data?.spot ? Math.round(live.data.spot / step) * step : 24500;
     const exp = targetExpiry || live.data?.expiryDates?.[0];
     let initialPremium = 0;
-    if (type === 'future') {
+    if (type === 'equity') {
+      initialPremium = live.data?.spot || 0;
+    } else if (type === 'future') {
       const futExp = targetFutExpiry || futExpiries?.[0];
       initialPremium = live.data?.futurePrices?.[futExp] || live.data?.futurePrice || live.data?.spot || 0;
     } else if (live.data?.byExpiry && exp) {
@@ -264,10 +269,14 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
     }
     setLegs(prev => [...prev, {
       id: `leg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      type: type, action: 'buy', strike: type === 'future' ? 0 : defaultStrike, qty: 1, premium: initialPremium,
-      lotSize: getLotSize(live.data?.symbol, live.data?.lotSize),
-      T: type === 'future' ? (calculateDTE(targetFutExpiry || futExpiries?.[0]) / 365) : (calculateDTE(exp) / 365),
-      expiry: type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : exp
+      type: type,
+      action: 'buy',
+      strike: (type === 'future' || type === 'equity') ? 0 : defaultStrike,
+      qty: type === 'equity' ? 1 : 1,
+      premium: initialPremium,
+      lotSize: type === 'equity' ? 1 : getLotSize(live.data?.symbol, live.data?.lotSize),
+      T: type === 'equity' ? 0 : (type === 'future' ? (calculateDTE(targetFutExpiry || futExpiries?.[0]) / 365) : (calculateDTE(exp) / 365)),
+      expiry: type === 'equity' ? null : (type === 'future' ? (targetFutExpiry || futExpiries?.[0]) : exp)
     }]);
   };
 
@@ -278,7 +287,13 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
       const exp = updated.expiry || targetExpiry || live.data?.expiryDates?.[0];
       if (updates.expiry !== undefined) updated.T = calculateDTE(updates.expiry) / 365;
       if (updates.strike !== undefined || updates.type !== undefined || updates.action !== undefined || updates.expiry !== undefined) {
-        if (updated.type === 'future') {
+        if (updated.type === 'equity') {
+          updated.premium = live.data?.spot || 0;
+          updated.strike = 0;
+          updated.lotSize = 1;
+          updated.expiry = null;
+          updated.T = 0;
+        } else if (updated.type === 'future') {
           const futExp = updated.expiry || targetFutExpiry || futExpiries?.[0];
           updated.premium = live.data?.futurePrices?.[futExp] || live.data?.futurePrice || live.data?.spot || 0;
           updated.strike = 0;
@@ -315,13 +330,24 @@ export function useLiveStrategy({ live, riskFreeRate, onTradeExecuted, injectedL
       const legsToExecute = legs.filter(leg => !leg.isComparative);
       if (legsToExecute.length === 0) return alert('No valid new legs to execute. Comparative legs cannot be traded again.');
 
-      const formattedLegs = legsToExecute.map(leg => ({
-        symbol: live.data?.symbol || 'NIFTY', type: leg.type, strike: leg.strike,
-        expiry: leg.type === 'future' ? (leg.expiry || targetFutExpiry || futExpiries?.[0]) : (leg.expiry || targetExpiry || live.data?.expiryDates?.[0]),
-        action: leg.action, orderType: 'market', qty: leg.qty, lotSize: leg.lotSize || getLotSize(live.data?.symbol, live.data?.lotSize), entryPrice: leg.premium,
-        targetPrice: leg.targetPrice || null,
-        stopLoss: leg.stopLoss || null
-      }));
+      const formattedLegs = legsToExecute.map(leg => {
+        // Map frontend 'equity' to backend 'underlying' enum value
+        const backendType = leg.type === 'equity' ? 'underlying' : leg.type;
+        const isEquity = leg.type === 'equity';
+        return {
+          symbol: live.data?.symbol || 'NIFTY',
+          type: backendType,
+          strike: isEquity ? 0 : leg.strike,
+          expiry: isEquity ? null : (leg.type === 'future' ? (leg.expiry || targetFutExpiry || futExpiries?.[0]) : (leg.expiry || targetExpiry || live.data?.expiryDates?.[0])),
+          action: leg.action,
+          orderType: 'market',
+          qty: leg.qty,
+          lotSize: isEquity ? 1 : (leg.lotSize || getLotSize(live.data?.symbol, live.data?.lotSize)),
+          entryPrice: leg.premium,
+          targetPrice: leg.targetPrice || null,
+          stopLoss: leg.stopLoss || null
+        };
+      });
 
       const res = await fetch('/api/trades/batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

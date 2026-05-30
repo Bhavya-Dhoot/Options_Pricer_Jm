@@ -46,7 +46,7 @@ export const placeTrade = async (req, res) => {
 
   try {
     const user = await User.findById(req.user._id).session(session);
-    const verifiedLotSize = getLotSize(symbol);
+    const verifiedLotSize = type === 'underlying' ? 1 : getLotSize(symbol);
     
     // Server-Side Price Verification
     registerSymbol(symbol); // Ensure symbol is tracked in background
@@ -275,7 +275,7 @@ export const placeBatchTrades = async (req, res) => {
         }
       }
       
-      const verifiedLotSize = getLotSize(leg.symbol || baseSymbol);
+      const verifiedLotSize = leg.type === 'underlying' ? 1 : getLotSize(leg.symbol || baseSymbol);
       let verifiedEntryPrice = 0;
       
       if (leg.type === 'future') {

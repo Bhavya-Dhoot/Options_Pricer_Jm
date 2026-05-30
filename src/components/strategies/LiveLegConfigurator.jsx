@@ -1,7 +1,7 @@
 import React from 'react';
 import { Trash2, Plus } from 'lucide-react';
 
-export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryDates = [], byExpiry = {}, onUpdateLeg, onAddLeg, onRemoveLeg, futurePrice, fetchExpiry }) {
+export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryDates = [], byExpiry = {}, onUpdateLeg, onAddLeg, onRemoveLeg, futurePrice, fetchExpiry, spotPrice }) {
   const getBadgeColor = (type, action) => {
     if (type === 'call' && action === 'buy') return 'text-green-400';
     if (type === 'put' && action === 'buy') return 'text-red-400';
@@ -9,8 +9,12 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
     if (type === 'put' && action === 'sell') return 'text-blue-400';
     if (type === 'future' && action === 'buy') return 'text-green-300';
     if (type === 'future' && action === 'sell') return 'text-red-300';
+    if (type === 'equity' && action === 'buy') return 'text-cyan-400';
+    if (type === 'equity' && action === 'sell') return 'text-pink-400';
     return 'text-gray-400';
   };
+
+  const isEquity = (type) => type === 'equity' || type === 'underlying';
 
   return (
     <div className="overflow-x-auto">
@@ -52,11 +56,19 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                     <option value="call">Call</option>
                     <option value="put">Put</option>
                     <option value="future">Future</option>
+                    <option value="equity">Equity</option>
                   </select>
                 </div>
               </td>
               <td className="py-2.5">
-                {leg.type === 'future' ? (
+                {isEquity(leg.type) ? (
+                  <div className="flex flex-col gap-1 w-44">
+                    <span className="text-cyan-400 font-mono text-xs px-2 py-1 bg-cyan-500/10 rounded border border-cyan-500/20 text-center font-bold">
+                      CASH / SPOT
+                    </span>
+                    <span className="text-[10px] text-[#8b949e] text-center">No expiry</span>
+                  </div>
+                ) : leg.type === 'future' ? (
                   <div className="flex flex-col gap-1 w-44">
                     <select
                       value={leg.expiry || ''}
@@ -127,17 +139,19 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
                   <div className="flex items-center gap-1">
                     <input 
                       type="number" 
-                      min="1" max="1000"
+                      min="1" max={isEquity(leg.type) ? 100000 : 1000}
                       value={leg.qty} 
                       disabled={leg.isComparative}
                       onChange={e => onUpdateLeg(leg.id, { qty: Number(e.target.value) })}
                       className="w-16 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[#e6edf3] font-mono focus:border-[#58a6ff] focus:outline-none disabled:opacity-50"
                     />
-                    <span className="text-xs text-[#8b949e]">Lots</span>
+                    <span className="text-xs text-[#8b949e]">{isEquity(leg.type) ? 'Shares' : 'Lots'}</span>
                   </div>
-                  <span className="text-[10px] text-[#58a6ff] font-mono font-semibold">
-                    Qty: {leg.qty * (leg.lotSize || 25)}
-                  </span>
+                  {!isEquity(leg.type) && (
+                    <span className="text-[10px] text-[#58a6ff] font-mono font-semibold">
+                      Qty: {leg.qty * (leg.lotSize || 25)}
+                    </span>
+                  )}
                 </div>
               </td>
               <td className="py-2.5">
@@ -178,11 +192,13 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
               </td>
               <td className="py-2.5">
                 <span className="text-[#58a6ff] font-mono font-semibold">
-                  {leg.type === 'call' 
-                    ? (leg.strike + leg.premium).toFixed(2) 
-                    : leg.type === 'put' 
-                      ? (leg.strike - leg.premium).toFixed(2) 
-                      : leg.premium.toFixed(2)}
+                  {isEquity(leg.type)
+                    ? leg.premium.toFixed(2)
+                    : leg.type === 'call' 
+                      ? (leg.strike + leg.premium).toFixed(2) 
+                      : leg.type === 'put' 
+                        ? (leg.strike - leg.premium).toFixed(2) 
+                        : leg.premium.toFixed(2)}
                 </span>
               </td>
               <td className="py-2.5 text-right">
@@ -220,6 +236,13 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
         >
           <Plus size={14} />
           Add Future
+        </button>
+        <button 
+          onClick={() => onAddLeg('equity')}
+          className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 bg-cyan-400/10 hover:bg-cyan-400/20 px-3 py-1.5 rounded-lg transition-colors font-semibold"
+        >
+          <Plus size={14} />
+          Add Equity
         </button>
       </div>
     </div>

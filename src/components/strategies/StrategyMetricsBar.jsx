@@ -31,7 +31,7 @@ export default function StrategyMetricsBar({ legs, globalInputs, marginRequired 
     
     // Net Premium
     const netPremium = legs.reduce((total, leg) => {
-      if (leg.type === 'future' || leg.type === 'underlying') return total;
+      if (leg.type === 'future' || leg.type === 'underlying' || leg.type === 'equity') return total;
       const sign = leg.action === 'buy' ? -1 : 1;
       return total + sign * leg.premium * leg.qty * (leg.lotSize || 25);
     }, 0);
@@ -39,16 +39,20 @@ export default function StrategyMetricsBar({ legs, globalInputs, marginRequired 
     // Greeks
     let netDelta = 0, netTheta = 0, netVega = 0;
     legs.forEach(leg => {
-      if (leg.type === 'underlying') {
-        const sign = leg.action === 'buy' ? 1 : -1;
+      const sign = leg.action === 'buy' ? 1 : -1;
+      if (leg.type === 'underlying' || leg.type === 'equity') {
+        // Equity: Delta = 1 per share (lotSize is always 1 for equity)
+        netDelta += sign * leg.qty * (leg.lotSize || 1);
+      } else if (leg.type === 'future') {
+        // Futures: Delta ≈ 1 per lot
         netDelta += sign * leg.qty * (leg.lotSize || 25);
       } else {
+        // Options: Use BSM greeks
         const bsm = calculateBSM(
           globalInputs.spot, leg.strike, leg.T, globalInputs.rate, 
           leg.iv || globalInputs.iv, leg.type.toUpperCase(), globalInputs.dividend
         );
         if (bsm) {
-          const sign = leg.action === 'buy' ? 1 : -1;
           netDelta += sign * bsm.delta * leg.qty * (leg.lotSize || 25);
           netTheta += sign * bsm.theta * leg.qty * (leg.lotSize || 25);
           netVega += sign * bsm.vega * leg.qty * (leg.lotSize || 25);
