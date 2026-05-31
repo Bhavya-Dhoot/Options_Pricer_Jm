@@ -38,7 +38,9 @@ function getLTPForTrade(trade, priceCache) {
   if (!cached || !cached.data) return null;
   const data = cached.data;
 
-  if (trade.type === 'future') {
+  if (trade.type === 'equity') {
+    return data.spot || null;
+  } else if (trade.type === 'future') {
     return data.futurePrices?.[trade.expiry] || null;
   } else if (trade.type === 'underlying') {
     return data.spot || null;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Briefcase, Activity, Clock, LogOut, ArrowUpRight, AlertTriangle } from 'lucide-react';
+import { DollarSign, Briefcase, Activity, Clock, LogOut, ArrowUpRight, AlertTriangle, BarChart2, TrendingUp } from 'lucide-react';
 import LiveStrategyBuilder from './LiveStrategyBuilder.jsx';
+import EquityTerminal from './components/EquityTerminal.jsx';
 import { estimateMargin } from './utils/marginCalculator.js';
 
 const parseExpiry = (expiryStr) => {
@@ -28,6 +29,7 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
   const [injectedLegs, setInjectedLegs] = useState([]);
   const [lastPortfolioUpdate, setLastPortfolioUpdate] = useState(null);
   const [portfolioTimeSinceUpdate, setPortfolioTimeSinceUpdate] = useState(0);
+  const [segment, setSegment] = useState('fno'); // 'fno' | 'equity'
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -42,6 +44,10 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     fetchProfileAndTrades();
   }, []);
 
+  // Separate trades by segment
+  const fnoTrades = trades.filter(t => t.type !== 'equity');
+  const equityTrades = trades.filter(t => t.type === 'equity');
+
   useEffect(() => {
     if (!profile) return;
     
@@ -50,19 +56,41 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     
     const fetchLivePrices = async () => {
       if (document.hidden) return; // Prevent background tab memory/bandwidth leaks
-      const openSymbols = [...new Set(trades.filter(t => t.status === 'OPEN').map(t => t.symbol))];
-      if (openSymbols.length === 0) return;
+      
+      // F&O symbols: high priority
+      const openFnoSymbols = [...new Set(fnoTrades.filter(t => t.status === 'OPEN').map(t => t.symbol))];
+      // Equity symbols: low priority (Tier 3)
+      const openEquitySymbols = [...new Set(equityTrades.filter(t => t.status === 'OPEN').map(t => t.symbol))];
+      
+      if (openFnoSymbols.length === 0 && openEquitySymbols.length === 0) return;
 
       try {
         const token = localStorage.getItem('auth_token');
-        const priorityParam = profile.role === 'admin' ? '&priority=true' : '';
-        const res = await fetch(`/api/trades/live-prices?symbols=${openSymbols.join(',')}${priorityParam}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          setLivePrices(await res.json());
-          setLastPortfolioUpdate(Date.now());
+        const newPrices = { ...livePrices };
+        
+        // Fetch F&O prices (higher priority)
+        if (openFnoSymbols.length > 0) {
+          const priorityParam = profile.role === 'admin' ? '&priority=true' : '';
+          const res = await fetch(`/api/trades/live-prices?symbols=${openFnoSymbols.join(',')}${priorityParam}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            Object.assign(newPrices, await res.json());
+          }
         }
+        
+        // Fetch Equity prices (Tier 3, lower priority)
+        if (openEquitySymbols.length > 0) {
+          const res = await fetch(`/api/trades/live-prices?symbols=${openEquitySymbols.join(',')}&tier=equity`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            Object.assign(newPrices, await res.json());
+          }
+        }
+        
+        setLivePrices(newPrices);
+        setLastPortfolioUpdate(Date.now());
       } catch (err) {}
     };
 
@@ -170,18 +198,16 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
   };
 
   const handleInjectToBuilder = (trade) => {
-    // Generate a comparative leg (map backend 'underlying' → frontend 'equity')
-    const frontendType = trade.type === 'underlying' ? 'equity' : trade.type;
-    const isEquity = trade.type === 'underlying';
+    // Generate a comparative leg
     const leg = {
       id: `compare-${trade._id}`,
-      type: frontendType,
+      type: trade.type,
       action: trade.action,
       strike: trade.strike,
       qty: trade.qty,
       premium: trade.entryPrice,
-      lotSize: isEquity ? 1 : trade.lotSize,
-      T: isEquity ? 0 : 0.05, // Equity has no time dimension
+      lotSize: trade.lotSize,
+      T: trade.type === 'future' ? 0.05 : 0.05, // Default approx
       expiry: trade.expiry,
       isComparative: true // Special flag
     };
@@ -190,8 +216,8 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
 
   if (loading) return <div className="p-8 text-center text-[#8b949e]">Loading portfolio...</div>;
 
-  const openTrades = trades.filter(t => t.status === 'OPEN');
-  const closedTrades = trades.filter(t => t.status === 'CLOSED');
+  const openTrades = fnoTrades.filter(t => t.status === 'OPEN');
+  const closedTrades = fnoTrades.filter(t => t.status === 'CLOSED');
 
   // Calculate real-time Unrealized PnL mathematically
   let totalUnrealizedPnL = 0;
@@ -244,6 +270,19 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     return { ...trade, liveLTP, pnl, lotSize };
   });
 
+  // Equity unrealized PnL
+  let equityUnrealizedPnL = 0;
+  const openEquityTrades = equityTrades.filter(t => t.status === 'OPEN');
+  openEquityTrades.forEach(trade => {
+    const data = livePrices[trade.symbol];
+    const cmp = data?.spot || trade.entryPrice;
+    const direction = trade.action === 'buy' ? 1 : -1;
+    equityUnrealizedPnL += direction * (cmp - trade.entryPrice) * trade.qty;
+  });
+
+  const combinedUnrealizedPnL = totalUnrealizedPnL + equityUnrealizedPnL;
+  const totalOpenPositions = openTrades.length + openEquityTrades.length;
+
   let usedMargin = 0;
   const tradesBySymbol = openTrades.reduce((acc, trade) => {
     if (!acc[trade.symbol]) acc[trade.symbol] = [];
@@ -263,6 +302,11 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
     }));
     const spotForMargin = livePrices[symbol]?.spot || live.data?.spot || tradesForSymbol[0].entryPrice;
     usedMargin += estimateMargin(marginPortfolioLegs, spotForMargin, symbol).totalMarginRequired;
+  });
+
+  // Add equity margin (100% of invested value)
+  openEquityTrades.forEach(trade => {
+    usedMargin += trade.entryPrice * trade.qty;
   });
 
   const virtualCapital = profile?.virtualCapital || 0;
@@ -346,8 +390,8 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
           </div>
           <div className="flex items-center justify-between border-t border-[#30363d] pt-2 mt-2">
             <div className="text-xs font-semibold text-[#8b949e] uppercase">Unrealized MTM</div>
-            <div className={`text-lg font-mono font-bold ${totalUnrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {totalUnrealizedPnL >= 0 ? '+' : ''}₹{totalUnrealizedPnL.toLocaleString(undefined, {minimumFractionDigits: 2})}
+            <div className={`text-lg font-mono font-bold ${combinedUnrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {combinedUnrealizedPnL >= 0 ? '+' : ''}₹{combinedUnrealizedPnL.toLocaleString(undefined, {minimumFractionDigits: 2})}
             </div>
           </div>
         </div>
@@ -356,167 +400,210 @@ export default function PaperTradeDashboard({ user, live, onLogout }) {
             <Briefcase size={18} className="text-purple-400" />
             <span className="text-xs font-semibold text-[#8b949e] uppercase">Open Positions</span>
           </div>
-          <div className="text-2xl font-mono font-bold text-[#e6edf3]">{openTrades.length}</div>
+          <div className="text-2xl font-mono font-bold text-[#e6edf3]">{totalOpenPositions}</div>
+          <div className="flex gap-3 mt-1 text-xs text-[#8b949e]">
+            <span>F&O: {openTrades.length}</span>
+            <span>Equity: {openEquityTrades.length}</span>
+          </div>
         </div>
       </div>
 
-      <div className="mb-8">
-        <h3 className="text-lg font-semibold text-[#e6edf3] mb-4">Strategy Terminal</h3>
-        <div className="bg-[#161b22] border border-[#30363d] rounded-xl overflow-hidden shadow-2xl">
-          <LiveStrategyBuilder 
-            live={live} 
-            riskFreeRate={6.5} 
-            isPaperTradeMode={true} 
-            onTradeExecuted={fetchProfileAndTrades}
-            injectedLegs={injectedLegs}
-          />
-        </div>
+      {/* Segment Tab Bar */}
+      <div className="flex items-center gap-1 mb-6 bg-[#0d1117] border border-[#30363d] rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setSegment('fno')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            segment === 'fno' 
+              ? 'bg-gradient-to-r from-[#58a6ff]/20 to-[#58a6ff]/10 text-[#58a6ff] border border-[#58a6ff]/30 shadow-lg shadow-[#58a6ff]/5' 
+              : 'text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#161b22]'
+          }`}
+        >
+          <BarChart2 size={16} />
+          F&O Terminal
+        </button>
+        <button
+          onClick={() => setSegment('equity')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            segment === 'equity' 
+              ? 'bg-gradient-to-r from-cyan-400/20 to-cyan-400/10 text-cyan-400 border border-cyan-400/30 shadow-lg shadow-cyan-400/5' 
+              : 'text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#161b22]'
+          }`}
+        >
+          <TrendingUp size={16} />
+          Equity
+        </button>
       </div>
 
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-[#e6edf3]">Active Positions</h3>
-        {augmentedOpenTrades.length > 0 && (
-          <button 
-            onClick={handleCloseAll}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg shadow-lg shadow-red-500/20 transition-colors"
-          >
-            Close All Positions
-          </button>
-        )}
-      </div>
-      <div className="card overflow-hidden mb-8">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-[#161b22] border-b border-[#30363d]">
-            <tr>
-              <th className="p-4 text-[#8b949e] font-semibold">Symbol</th>
-              <th className="p-4 text-[#8b949e] font-semibold">Action</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Qty</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Avg Entry</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">LTP</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Unrealised MTM</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Manage</th>
-            </tr>
-          </thead>
-          <tbody>
-            {augmentedOpenTrades.length === 0 ? (
-              <tr><td colSpan="7" className="p-4 text-center text-[#8b949e]">No open positions. Use the Strategy Builder to place a trade.</td></tr>
-            ) : augmentedOpenTrades.map(trade => (
-              <tr key={trade._id} className="border-b border-[#30363d]/50 hover:bg-[#161b22]/50 transition-colors">
-                <td className="p-4">
-                  <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
-                  <div className="text-xs text-[#8b949e]">{trade.type === 'underlying' ? 'EQUITY (CASH)' : `${trade.expiry || 'SPOT'} ${trade.type.toUpperCase()} ${trade.strike ? trade.strike : ''}`}</div>
-                  {(trade.targetPrice || trade.stopLoss) && (
-                    <div className="flex gap-1.5 mt-1">
-                      {trade.targetPrice && (
-                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/20">
-                          TP ₹{trade.targetPrice}
-                        </span>
-                      )}
-                      {trade.stopLoss && (
-                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20">
-                          SL ₹{trade.stopLoss}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </td>
-                <td className="p-4">
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${trade.action === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                    {trade.action.toUpperCase()}
-                  </span>
-                </td>
-                <td className="p-4 text-right">
-                  <div className="font-mono text-[#e6edf3]">{trade.qty * trade.lotSize}</div>
-                  <div className="text-xs text-[#8b949e]">{trade.type === 'underlying' ? `${trade.qty} Shares` : `${trade.qty} Lots`}</div>
-                </td>
-                <td className="p-4 text-right font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</td>
-                <td className="p-4 text-right font-mono text-[#58a6ff]">₹{trade.liveLTP?.toFixed(2)}</td>
-                <td className={`p-4 text-right font-mono font-bold ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  <div>{trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(2)}</div>
-                  <div className="text-[10px] font-normal text-[#8b949e]">
-                    {((trade.action === 'buy' ? 1 : -1) * (trade.liveLTP - trade.entryPrice)).toFixed(2)} per unit
-                  </div>
-                </td>
-                <td className="p-4 text-right flex items-center justify-end gap-2">
-                  <button 
-                    onClick={() => handleInjectToBuilder(trade)}
-                    className="p-1 text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#58a6ff]/10 rounded transition-colors"
-                    title="Load to Strategy Builder to Compare"
-                  >
-                    <ArrowUpRight size={16} />
-                  </button>
-                  <button 
-                    onClick={() => handleExitTrade(trade._id, trade.qty, trade.liveLTP)} 
-                    className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-semibold transition-colors"
-                  >
-                    Close MTM
-                  </button>
-                </td>
+      {/* F&O Segment */}
+      <div style={{ display: segment === 'fno' ? 'block' : 'none' }}>
+        <div className="mb-8">
+          <h3 className="text-lg font-semibold text-[#e6edf3] mb-4">Strategy Terminal</h3>
+          <div className="bg-[#161b22] border border-[#30363d] rounded-xl overflow-hidden shadow-2xl">
+            <LiveStrategyBuilder 
+              live={live} 
+              riskFreeRate={6.5} 
+              isPaperTradeMode={true} 
+              onTradeExecuted={fetchProfileAndTrades}
+              injectedLegs={injectedLegs}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-[#e6edf3]">Active Positions</h3>
+          {augmentedOpenTrades.length > 0 && (
+            <button 
+              onClick={handleCloseAll}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg shadow-lg shadow-red-500/20 transition-colors"
+            >
+              Close All Positions
+            </button>
+          )}
+        </div>
+        <div className="card overflow-hidden mb-8">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-[#161b22] border-b border-[#30363d]">
+              <tr>
+                <th className="p-4 text-[#8b949e] font-semibold">Symbol</th>
+                <th className="p-4 text-[#8b949e] font-semibold">Action</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Qty</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Avg Entry</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">LTP</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Unrealised MTM</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Manage</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="flex items-center justify-between mb-4 mt-12">
-        <h3 className="text-lg font-semibold text-[#e6edf3]">P&L Ledger (Completed Trades)</h3>
-      </div>
-      <div className="card overflow-hidden mb-8">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-[#161b22] border-b border-[#30363d]">
-            <tr>
-              <th className="p-4 text-[#8b949e] font-semibold">Trade Details</th>
-              <th className="p-4 text-[#8b949e] font-semibold">Action</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Qty</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Entry</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Exit</th>
-              <th className="p-4 text-[#8b949e] font-semibold text-right">Realized P&L</th>
-            </tr>
-          </thead>
-          <tbody>
-            {closedTrades.length === 0 ? (
-              <tr><td colSpan="6" className="p-4 text-center text-[#8b949e]">No completed trades found.</td></tr>
-            ) : closedTrades.map(trade => (
-              <tr key={trade._id} className="border-b border-[#30363d]/50 hover:bg-[#161b22]/50 transition-colors">
-                <td className="p-4">
-                  <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
-                  <div className="text-xs text-[#8b949e]">
-                    {trade.type === 'underlying' ? 'EQUITY (CASH)' : `${trade.expiry || 'SPOT'} ${trade.type.toUpperCase()} ${trade.strike ? trade.strike : ''}`}
-                  </div>
-                  <div className="text-[10px] text-gray-500 mt-1" title="Unique Trade Hash for Audit">ID: {trade._id}</div>
-                </td>
-                <td className="p-4">
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${trade.action === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                    {trade.action.toUpperCase()}
-                  </span>
-                </td>
-                <td className="p-4 text-right">
-                  <div className="font-mono text-[#e6edf3]">{trade.qty * (trade.lotSize || 1)}</div>
-                  <div className="text-xs text-[#8b949e]">{trade.type === 'underlying' ? `${trade.qty} Shares` : `${trade.qty} Lots`}</div>
-                </td>
-                <td className="p-4 text-right">
-                  <div className="font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</div>
-                  <div className="text-[10px] text-gray-500">{new Date(trade.entryTime).toLocaleString()}</div>
-                </td>
-                <td className="p-4 text-right">
-                  <div className="font-mono text-[#e6edf3]">₹{trade.exitPrice?.toFixed(2)}</div>
-                  <div className="text-[10px] text-gray-500">{new Date(trade.exitTime).toLocaleString()}</div>
-                </td>
-                <td className={`p-4 text-right font-mono font-bold ${trade.realizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  <div>{trade.realizedPnL >= 0 ? '+' : ''}₹{trade.realizedPnL?.toFixed(2) || '0.00'}</div>
-                  {trade.exitReason && (
-                    <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded mt-1 inline-block ${
-                      trade.exitReason === 'TARGET_HIT' ? 'bg-green-500/15 text-green-400 border border-green-500/20' :
-                      trade.exitReason === 'STOPLOSS_HIT' ? 'bg-red-500/15 text-red-400 border border-red-500/20' :
-                      'bg-gray-500/15 text-gray-400 border border-gray-500/20'
-                    }`}>
-                      {trade.exitReason === 'TARGET_HIT' ? '🎯 Target' : trade.exitReason === 'STOPLOSS_HIT' ? '🛑 Stop Loss' : 'Manual'}
+            </thead>
+            <tbody>
+              {augmentedOpenTrades.length === 0 ? (
+                <tr><td colSpan="7" className="p-4 text-center text-[#8b949e]">No open positions. Use the Strategy Builder to place a trade.</td></tr>
+              ) : augmentedOpenTrades.map(trade => (
+                <tr key={trade._id} className="border-b border-[#30363d]/50 hover:bg-[#161b22]/50 transition-colors">
+                  <td className="p-4">
+                    <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
+                    <div className="text-xs text-[#8b949e]">{trade.expiry || 'SPOT'} {trade.type.toUpperCase()} {trade.strike ? trade.strike : ''}</div>
+                    {(trade.targetPrice || trade.stopLoss) && (
+                      <div className="flex gap-1.5 mt-1">
+                        {trade.targetPrice && (
+                          <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/20">
+                            TP ₹{trade.targetPrice}
+                          </span>
+                        )}
+                        {trade.stopLoss && (
+                          <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20">
+                            SL ₹{trade.stopLoss}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="p-4">
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${trade.action === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {trade.action.toUpperCase()}
                     </span>
-                  )}
-                </td>
+                  </td>
+                  <td className="p-4 text-right">
+                    <div className="font-mono text-[#e6edf3]">{trade.qty * trade.lotSize}</div>
+                    <div className="text-xs text-[#8b949e]">{trade.qty} Lots</div>
+                  </td>
+                  <td className="p-4 text-right font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</td>
+                  <td className="p-4 text-right font-mono text-[#58a6ff]">₹{trade.liveLTP?.toFixed(2)}</td>
+                  <td className={`p-4 text-right font-mono font-bold ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div>{trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(2)}</div>
+                    <div className="text-[10px] font-normal text-[#8b949e]">
+                      {((trade.action === 'buy' ? 1 : -1) * (trade.liveLTP - trade.entryPrice)).toFixed(2)} per unit
+                    </div>
+                  </td>
+                  <td className="p-4 text-right flex items-center justify-end gap-2">
+                    <button 
+                      onClick={() => handleInjectToBuilder(trade)}
+                      className="p-1 text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#58a6ff]/10 rounded transition-colors"
+                      title="Load to Strategy Builder to Compare"
+                    >
+                      <ArrowUpRight size={16} />
+                    </button>
+                    <button 
+                      onClick={() => handleExitTrade(trade._id, trade.qty, trade.liveLTP)} 
+                      className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-semibold transition-colors"
+                    >
+                      Close MTM
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-between mb-4 mt-12">
+          <h3 className="text-lg font-semibold text-[#e6edf3]">P&L Ledger (Completed Trades)</h3>
+        </div>
+        <div className="card overflow-hidden mb-8">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-[#161b22] border-b border-[#30363d]">
+              <tr>
+                <th className="p-4 text-[#8b949e] font-semibold">Trade Details</th>
+                <th className="p-4 text-[#8b949e] font-semibold">Action</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Qty</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Entry</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Exit</th>
+                <th className="p-4 text-[#8b949e] font-semibold text-right">Realized P&L</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {closedTrades.length === 0 ? (
+                <tr><td colSpan="6" className="p-4 text-center text-[#8b949e]">No completed trades found.</td></tr>
+              ) : closedTrades.map(trade => (
+                <tr key={trade._id} className="border-b border-[#30363d]/50 hover:bg-[#161b22]/50 transition-colors">
+                  <td className="p-4">
+                    <div className="font-bold text-[#e6edf3]">{trade.symbol}</div>
+                    <div className="text-xs text-[#8b949e]">
+                      {trade.expiry || 'SPOT'} {trade.type.toUpperCase()} {trade.strike ? trade.strike : ''}
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-1" title="Unique Trade Hash for Audit">ID: {trade._id}</div>
+                  </td>
+                  <td className="p-4">
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${trade.action === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {trade.action.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <div className="font-mono text-[#e6edf3]">{trade.qty * (trade.lotSize || 1)}</div>
+                    <div className="text-xs text-[#8b949e]">{trade.qty} Lots</div>
+                  </td>
+                  <td className="p-4 text-right">
+                    <div className="font-mono text-[#e6edf3]">₹{trade.entryPrice?.toFixed(2)}</div>
+                    <div className="text-[10px] text-gray-500">{new Date(trade.entryTime).toLocaleString()}</div>
+                  </td>
+                  <td className="p-4 text-right">
+                    <div className="font-mono text-[#e6edf3]">₹{trade.exitPrice?.toFixed(2)}</div>
+                    <div className="text-[10px] text-gray-500">{new Date(trade.exitTime).toLocaleString()}</div>
+                  </td>
+                  <td className={`p-4 text-right font-mono font-bold ${trade.realizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div>{trade.realizedPnL >= 0 ? '+' : ''}₹{trade.realizedPnL?.toFixed(2) || '0.00'}</div>
+                    {trade.exitReason && (
+                      <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded mt-1 inline-block ${
+                        trade.exitReason === 'TARGET_HIT' ? 'bg-green-500/15 text-green-400 border border-green-500/20' :
+                        trade.exitReason === 'STOPLOSS_HIT' ? 'bg-red-500/15 text-red-400 border border-red-500/20' :
+                        'bg-gray-500/15 text-gray-400 border border-gray-500/20'
+                      }`}>
+                        {trade.exitReason === 'TARGET_HIT' ? '🎯 Target' : trade.exitReason === 'STOPLOSS_HIT' ? '🛑 Stop Loss' : 'Manual'}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Equity Segment */}
+      <div style={{ display: segment === 'equity' ? 'block' : 'none' }}>
+        <EquityTerminal
+          trades={trades}
+          livePrices={livePrices}
+          onTradeExecuted={fetchProfileAndTrades}
+          onExitTrade={handleExitTrade}
+        />
       </div>
     </div>
   );

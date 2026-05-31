@@ -131,7 +131,30 @@ getAngelSession().then(() => {
 });
 
 import { formatExpiry } from './src/application/marketDataService.js';
-import { getLatestPrice, forceFetchLatestPrice } from './src/application/priceCache.js';
+import { getLatestPrice, forceFetchLatestPrice, fetchEquitySpotPrice } from './src/application/priceCache.js';
+
+// Lightweight equity spot price endpoint (1 API credit)
+app.get('/api/equity/quote', async (req, res) => {
+  const symbol = req.query.symbol?.toUpperCase();
+  if (!symbol || !/^[A-Z0-9&-]{1,20}$/.test(symbol)) {
+    return res.status(400).json({ error: 'Invalid symbol format.' });
+  }
+  try {
+    // Try cache first
+    const cached = getLatestPrice(symbol);
+    if (cached?.data?.spot && (Date.now() - cached.timestamp < 10000)) {
+      return res.json({ symbol, ltp: cached.data.spot, cached: true });
+    }
+    // Lightweight LTP-only fetch
+    const ltp = await fetchEquitySpotPrice(symbol);
+    if (ltp) {
+      return res.json({ symbol, ltp, cached: false });
+    }
+    res.status(404).json({ error: 'Symbol not found or market data unavailable.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.get('/api/option-chain', async (req, res) => {
   const symbol = req.query.symbol?.toUpperCase() || 'NIFTY';

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import Trade from '../domain/Trade.js';
 import User from '../domain/User.js';
-import { getLatestPrice, registerSymbol, forceFetchLatestPrice } from './priceCache.js';
+import { getLatestPrice, registerSymbol, forceFetchLatestPrice, fetchEquitySpotPrice } from './priceCache.js';
 import { getLotSize } from '../../scripMaster.js';
 import { estimateMargin } from '../domain/marginCalculator.js';
 
@@ -46,7 +46,7 @@ export const placeTrade = async (req, res) => {
 
   try {
     const user = await User.findById(req.user._id).session(session);
-    const verifiedLotSize = type === 'underlying' ? 1 : getLotSize(symbol);
+    const verifiedLotSize = getLotSize(symbol);
     
     // Server-Side Price Verification
     registerSymbol(symbol); // Ensure symbol is tracked in background
@@ -112,11 +112,33 @@ export const placeTrade = async (req, res) => {
       verifiedEntryPrice = Number(limitPrice);
     }
 
+    // Equity-specific overrides
+    const isEquity = type === 'equity';
+    const verifiedLotSizeFinal = isEquity ? 1 : verifiedLotSize;
+    const finalStrike = isEquity ? 0 : strike;
+    const finalExpiry = isEquity ? null : expiry;
+
+    // If equity and market order, use lightweight spot-only fetch
+    if (isEquity && orderType === 'market') {
+      const spotLtp = await fetchEquitySpotPrice(symbol);
+      if (!spotLtp) {
+        await session.abortTransaction();
+        return res.status(400).json({ error: 'Equity spot price unavailable. Try again.' });
+      }
+      verifiedEntryPrice = spotLtp;
+    }
+
     // OPT-2 Fix: Reuse the already-fetched liveData for margin calculation
     // instead of calling getLatestPrice again (previously called 3 times).
     const spotForStandaloneMargin = liveData?.data?.spot || verifiedEntryPrice;
-    const standaloneMarginEst = estimateMargin([{ type, action, qty, lotSize: verifiedLotSize, strike, expiry, premium: verifiedEntryPrice }], spotForStandaloneMargin, symbol);
-    const estimatedMargin = standaloneMarginEst.totalMarginRequired;
+    let estimatedMargin;
+    if (isEquity) {
+      // Equity: 100% cash margin (no leverage)
+      estimatedMargin = verifiedEntryPrice * qty * 1; // lotSize=1
+    } else {
+      const standaloneMarginEst = estimateMargin([{ type, action, qty, lotSize: verifiedLotSizeFinal, strike: finalStrike, expiry: finalExpiry, premium: verifiedEntryPrice }], spotForStandaloneMargin, symbol);
+      estimatedMargin = standaloneMarginEst.totalMarginRequired;
+    }
 
     if (estimatedMargin > Number.MAX_SAFE_INTEGER || (verifiedEntryPrice * qty * verifiedLotSize) > Number.MAX_SAFE_INTEGER) {
       await session.abortTransaction();
@@ -143,7 +165,7 @@ export const placeTrade = async (req, res) => {
     }));
     
     // Check holistic margin if this new trade is added
-    const newLeg = { type, action, qty, lotSize: verifiedLotSize, strike, expiry, premium: verifiedEntryPrice };
+    const newLeg = { type, action, qty, lotSize: verifiedLotSizeFinal, strike: finalStrike, expiry: finalExpiry, premium: verifiedEntryPrice };
     const combinedLegs = [...allPortfolioLegs, newLeg];
     
     // OPT-2 Fix: Reuse liveData from price verification (no redundant 3rd call)
@@ -153,8 +175,11 @@ export const placeTrade = async (req, res) => {
     const newTotalMargin = newMarginEst.totalMarginRequired;
 
     let cashflow = 0;
-    if (type !== 'future') {
-       cashflow = (action === 'buy' ? -1 : 1) * verifiedEntryPrice * qty * verifiedLotSize;
+    if (isEquity) {
+      // Equity: full cash deduction for buy
+      cashflow = action === 'buy' ? -(verifiedEntryPrice * qty) : (verifiedEntryPrice * qty);
+    } else if (type !== 'future') {
+       cashflow = (action === 'buy' ? -1 : 1) * verifiedEntryPrice * qty * verifiedLotSizeFinal;
     } else {
        cashflow = -estimatedMargin; // Deduct margin for futures entry
     }
@@ -190,13 +215,13 @@ export const placeTrade = async (req, res) => {
       user: req.user._id,
       symbol,
       type,
-      strike,
-      expiry,
+      strike: finalStrike,
+      expiry: finalExpiry,
       action,
       orderType,
       limitPrice,
       qty,
-      lotSize: verifiedLotSize,
+      lotSize: verifiedLotSizeFinal,
       marginBlocked: estimatedMargin,
       entryPrice: orderType === 'market' ? verifiedEntryPrice : null,
       entryTime: orderType === 'market' ? Date.now() : null,
@@ -275,7 +300,7 @@ export const placeBatchTrades = async (req, res) => {
         }
       }
       
-      const verifiedLotSize = leg.type === 'underlying' ? 1 : getLotSize(leg.symbol || baseSymbol);
+      const verifiedLotSize = getLotSize(leg.symbol || baseSymbol);
       let verifiedEntryPrice = 0;
       
       if (leg.type === 'future') {
@@ -427,9 +452,10 @@ export const getLivePrices = async (req, res) => {
     // This returns the fast-cache
     const symbols = req.query.symbols ? req.query.symbols.split(',') : [];
     const isPriority = req.query.priority === 'true';
+    const tier = req.query.tier || (isPriority ? 'priority' : 'regular');
     const prices = {};
     for (const sym of symbols) {
-      registerSymbol(sym, isPriority); // Track symbol and its priority status
+      registerSymbol(sym, tier); // Track symbol at the appropriate priority tier
       const cache = getLatestPrice(sym);
       if (cache) {
         prices[sym] = cache.data;
@@ -467,7 +493,13 @@ export const exitTrade = async (req, res) => {
       return res.status(400).json({ error: 'Market data temporarily unavailable. Please try exiting again.' });
     }
 
-    if (trade.type === 'future') {
+    if (trade.type === 'equity') {
+      verifiedExitPrice = liveData.data.spot;
+      if (!verifiedExitPrice) {
+        await session.abortTransaction();
+        return res.status(400).json({ error: 'Equity spot price unavailable.' });
+      }
+    } else if (trade.type === 'future') {
       const futPrice = liveData.data.futurePrices?.[trade.expiry];
       if (!futPrice) { 
         const expiryTime = parseExpiry(trade.expiry);
@@ -515,7 +547,9 @@ export const exitTrade = async (req, res) => {
     if (isNaN(pnl)) { await session.abortTransaction(); return res.status(400).json({ error: 'Critical calculation error: Resulting PnL is NaN' }); }
 
     let exitCashflow = 0;
-    if (trade.type !== 'future') {
+    if (trade.type === 'equity') {
+      exitCashflow = verifiedExitPrice * parsedExitQty; // Full cash return for equity sell
+    } else if (trade.type !== 'future') {
       exitCashflow = (trade.action === 'buy' ? 1 : -1) * verifiedExitPrice * parsedExitQty * lotSize;
     } else {
       exitCashflow = pnl + (trade.marginBlocked || 0);
