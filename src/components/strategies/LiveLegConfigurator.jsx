@@ -237,13 +237,7 @@ export default function LiveLegConfigurator({ legs, expiryDates = [], futExpiryD
           <Plus size={14} />
           Add Future
         </button>
-        <button 
-          onClick={() => onAddLeg('equity')}
-          className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 bg-cyan-400/10 hover:bg-cyan-400/20 px-3 py-1.5 rounded-lg transition-colors font-semibold"
-        >
-          <Plus size={14} />
-          Add Equity
-        </button>
+
       </div>
     </div>
   );

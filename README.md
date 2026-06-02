@@ -12,6 +12,7 @@ Built with React 19, Vite 8, Recharts, and a Node.js Express Backend.
 To comply with strict broker API limits (10 requests per second) while supporting concurrent users, the backend utilizes a sophisticated **Dynamic Round-Robin Priority Queue**.
 - It dynamically tracks active API quota remaining and speeds up/slows down polling mathematically to guarantee we stay exactly under 5,000 requests/hour.
 - It features a **Dynamic Priority Guarantee**: If a user is actively paper trading or an admin is viewing live trades, their symbols are elevated to the High Priority Queue, scaling smoothly up to a 100% API allocation ratio based on load.
+- **3-Tier Priority Queue for Equity:** To accommodate the Equity terminal, the engine categorizes F&O symbols (Priority & Regular) into upper tiers requiring full option chain fetches (heavy bandwidth), while routing Equity requests into a highly optimized Tier 3 utilizing an LTP-only micro-fetch. Equity is mathematically guaranteed at least 1 execution slot every 5 background cycles (Anti-starvation).
 - **Memory & Bandwidth Garbage Collection**: Active symbols are tracked by their last request time. If a symbol hasn't been accessed in 10 minutes and is not part of an active portfolio, the `priceCache` microservice dynamically prunes it, preventing bandwidth leaks and avoiding IP bans.
 
 ### 🛡️ Institutional-Grade Margin Engine (SPAN Offsets)
@@ -38,6 +39,7 @@ To ensure mathematical perfection across edge-cases, the engine includes strict 
 
 ### ⚡ Unified Paper Trading Terminal
 The Strategy Builder is deeply integrated into the Paper Trading Dashboard. Unauthenticated users get a pure mathematical sandbox, while authenticated users can save custom templates, utilize 1-click strategy generation (Straddles, Spreads, Condors), and execute virtual trades seamlessly into a MongoDB portfolio with real-time MTM (Mark-To-Market) tracking.
+- **Dedicated Equity Segment:** A separate workspace for purely taking delivery/intraday positions in underlying equities at spot market prices, structurally isolated from the F&O dashboard to prevent margin and lifecycle contamination.
 - **Immutable P&L Ledger & Audit Trail:** A permanent ledger tracks all closed positions with exact entry/exit pricing, lifecycle timestamps, and absolute MongoDB Trade ID hashes to guarantee execution transparency and auditability.
 - **Global Portfolio Escape Hatch:** A 1-click "Close All Positions" market escape trigger allows sequential, instantaneous portfolio flattening during extreme volatility.
 - **Auto-Login JWT Session Persistence:** Secure, silent background re-hydration polling using `localStorage` ensures that active paper trading sessions persist seamlessly across browser reloads or tab restorations without forcing re-authentication.
