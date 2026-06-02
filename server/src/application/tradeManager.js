@@ -54,20 +54,33 @@ export const placeTrade = async (req, res) => {
     let liveData = null; // Hoisted for reuse in margin calculation (OPT-2)
     
     if (orderType === 'market') {
-      liveData = getLatestPrice(symbol);
+      const isEquity = type === 'equity';
       
-      // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
-      if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
-        try {
-          liveData = await forceFetchLatestPrice(symbol);
-        } catch (e) {
-          console.warn(`[TradeManager] Force fetch failed for ${symbol}, using cache fallback.`, e.message);
+      if (isEquity) {
+        // Equity-specific lightweight spot-only fetch
+        const spotLtp = await fetchEquitySpotPrice(symbol);
+        if (!spotLtp) {
+          await session.abortTransaction();
+          return res.status(400).json({ error: 'Equity spot price unavailable. Try again.' });
         }
-      }
+        verifiedEntryPrice = spotLtp;
+        liveData = { data: { spot: spotLtp }, timestamp: Date.now() };
+      } else {
+        liveData = getLatestPrice(symbol);
+        
+        // Force an immediate API fetch if the cache is older than 500ms (slippage protection)
+        if (!liveData || !liveData.timestamp || Date.now() - liveData.timestamp > 500) {
+          try {
+            liveData = await forceFetchLatestPrice(symbol);
+          } catch (e) {
+            console.warn(`[TradeManager] Force fetch failed for ${symbol}, using cache fallback.`, e.message);
+          }
+        }
 
-      if (!liveData || !liveData.data) {
-        await session.abortTransaction();
-        return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
+        if (!liveData || !liveData.data) {
+          await session.abortTransaction();
+          return res.status(400).json({ error: 'Market data unavailable, try again in 1 second.' });
+        }
       }
 
       if (type === 'future') {
@@ -77,8 +90,8 @@ export const placeTrade = async (req, res) => {
           return res.status(400).json({ error: 'Invalid future expiry or pricing unavailable.' });
         }
         verifiedEntryPrice = futPrice;
-      } else if (type === 'underlying') {
-        verifiedEntryPrice = liveData.data.spot;
+      } else if (type === 'underlying' || type === 'equity') {
+        verifiedEntryPrice = liveData.data.spot || liveData.ltp;
       } else {
         let chain = liveData.data.byExpiry?.[expiry];
         if (!chain) {
@@ -118,15 +131,7 @@ export const placeTrade = async (req, res) => {
     const finalStrike = isEquity ? 0 : strike;
     const finalExpiry = isEquity ? null : expiry;
 
-    // If equity and market order, use lightweight spot-only fetch
-    if (isEquity && orderType === 'market') {
-      const spotLtp = await fetchEquitySpotPrice(symbol);
-      if (!spotLtp) {
-        await session.abortTransaction();
-        return res.status(400).json({ error: 'Equity spot price unavailable. Try again.' });
-      }
-      verifiedEntryPrice = spotLtp;
-    }
+
 
     // OPT-2 Fix: Reuse the already-fetched liveData for margin calculation
     // instead of calling getLatestPrice again (previously called 3 times).
@@ -307,8 +312,8 @@ export const placeBatchTrades = async (req, res) => {
         const futPrice = liveData.data.futurePrices?.[leg.expiry];
         if (!futPrice) { await session.abortTransaction(); return res.status(400).json({ error: 'Future pricing unavailable.' }); }
         verifiedEntryPrice = futPrice;
-      } else if (leg.type === 'underlying') {
-        verifiedEntryPrice = liveData.data.spot;
+      } else if (leg.type === 'underlying' || leg.type === 'equity') {
+        verifiedEntryPrice = liveData.data.spot || liveData.ltp;
       } else {
         let chain = liveData.data.byExpiry?.[leg.expiry];
         if (!chain) {
